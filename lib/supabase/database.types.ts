@@ -22,6 +22,7 @@ export interface Database {
           maintenance_data: Json | null
           total_landscape_hours: number | null
           calculated_drive_time: number | null
+          bid_due_date: string | null
           created_at: string
           updated_at: string
         }
@@ -36,6 +37,7 @@ export interface Database {
           maintenance_data?: Json | null
           total_landscape_hours?: number | null
           calculated_drive_time?: number | null
+          bid_due_date?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -50,6 +52,7 @@ export interface Database {
           maintenance_data?: Json | null
           total_landscape_hours?: number | null
           calculated_drive_time?: number | null
+          bid_due_date?: string | null
           created_at?: string
           updated_at?: string
         }

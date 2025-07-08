@@ -34,6 +34,7 @@ export const useProperties = () => {
         maintenanceData: p.maintenance_data,
         totalLandscapeHours: p.total_landscape_hours,
         calculatedDriveTime: p.calculated_drive_time,
+        bidDueDate: p.bid_due_date,
         savedAt: new Date(p.updated_at)
       }));
       
@@ -73,6 +74,7 @@ export const useProperties = () => {
         maintenanceData: data.property.maintenance_data,
         totalLandscapeHours: data.property.total_landscape_hours,
         calculatedDriveTime: data.property.calculated_drive_time,
+        bidDueDate: data.property.bid_due_date,
         savedAt: new Date(data.property.updated_at)
       };
       

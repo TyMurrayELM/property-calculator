@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Save, FileDown, Building2, Calculator, TreePine, MapPin, Navigation, Loader2, CheckCircle, ChevronDown, ChevronUp, Map, Trash2, AlertCircle, Car, Table, Upload, Users } from 'lucide-react';
+import { Save, FileDown, Building2, Calculator, TreePine, MapPin, Navigation, Loader2, CheckCircle, ChevronDown, ChevronUp, Map, Trash2, AlertCircle, Car, Table, Upload, Users, Calendar } from 'lucide-react';
 import MaintenanceCalculator from './MaintenanceCalculator';
 import LandscapingEstimator from './LandscapingEstimator';
 import dynamic from 'next/dynamic';
@@ -97,6 +97,7 @@ export interface Property {
   maintenanceData?: any;
   totalLandscapeHours?: number;
   calculatedDriveTime?: number | null;
+  bidDueDate?: string | null;
   savedAt?: Date;
 }
 
@@ -106,7 +107,8 @@ const PropertyCalculator = () => {
     address: '',
     type: '',
     market: 'PHX',
-    branch: 'phx-sw'
+    branch: 'phx-sw',
+    bidDueDate: null
   });
 
   const [landscapeHours, setLandscapeHours] = useState<number>(0);
@@ -201,7 +203,8 @@ const PropertyCalculator = () => {
         totalLandscapeHours: landscapeHours,
         calculatedDriveTime: calculatedDriveTime,
         landscapeData: landscapeFormData,
-        maintenanceData: maintenanceFormData
+        maintenanceData: maintenanceFormData,
+        bidDueDate: currentProperty.bidDueDate
       };
 
       await saveToSupabase(propertyToSave);
@@ -228,7 +231,8 @@ const PropertyCalculator = () => {
           address: '',
           type: '',
           market: 'PHX',
-          branch: 'phx-sw'
+          branch: 'phx-sw',
+          bidDueDate: null
         });
         setLandscapeHours(0);
         setCalculatedDriveTime(null);
@@ -242,7 +246,10 @@ const PropertyCalculator = () => {
   };
 
   const loadProperty = (property: Property) => {
-    setCurrentProperty(property);
+    setCurrentProperty({
+      ...property,
+      bidDueDate: property.bidDueDate || null
+    });
     if (property.totalLandscapeHours) {
       setLandscapeHours(property.totalLandscapeHours);
     }
@@ -276,6 +283,7 @@ const PropertyCalculator = () => {
       calculatedDriveTime,
       landscapeFormData,
       maintenanceFormData,
+      bidDueDate: currentProperty.bidDueDate,
       exportDate: new Date().toISOString()
     }, null, 2);
     
@@ -674,6 +682,7 @@ const PropertyCalculator = () => {
                   <span className="text-sm text-gray-500 ml-2">
                     {currentProperty.name}
                     {currentProperty.type && ` • ${currentProperty.type}`}
+                    {currentProperty.bidDueDate && ` • Due: ${new Date(currentProperty.bidDueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
                     {getCurrentBranch() && ` • ${getCurrentBranch()?.name}`}
                   </span>
                 )}
@@ -716,6 +725,18 @@ const PropertyCalculator = () => {
                       <SelectItem value="resort">Resort</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+                <div>
+                  <Label className="flex items-center gap-2">
+                    <Calendar className="h-4 w-4" />
+                    Bid Due Date
+                  </Label>
+                  <Input
+                    type="date"
+                    value={currentProperty.bidDueDate || ''}
+                    onChange={(e) => handlePropertyChange('bidDueDate', e.target.value || null)}
+                    className="mt-1"
+                  />
                 </div>
                 <div>
                   <Label>Region</Label>
@@ -1114,9 +1135,10 @@ const PropertyCalculator = () => {
                 <div className="overflow-x-auto w-full">
                   <table className="w-full text-sm table-fixed">
                     <colgroup>
-                      <col className="w-[30%]" />
+                      <col className="w-[25%]" />
+                      <col className="w-[7%]" />
                       <col className="w-[8%]" />
-                      <col className="w-[13%]" />
+                      <col className="w-[11%]" />
                       <col className="w-[8%]" />
                       <col className="w-[8%]" />
                       <col className="w-[10%]" />
@@ -1128,6 +1150,7 @@ const PropertyCalculator = () => {
                       <tr>
                         <th className="px-5 py-3 text-left font-semibold text-gray-900">Property</th>
                         <th className="px-5 py-3 text-left font-semibold text-gray-900">Type</th>
+                        <th className="px-5 py-3 text-center font-semibold text-gray-900">Bid Due</th>
                         <th className="px-5 py-3 text-left font-semibold text-gray-900">Region/Branch</th>
                         <th className="px-5 py-3 text-right font-semibold text-gray-900">Weekly Hours</th>
                         <th className="px-5 py-3 text-right font-semibold text-gray-900">Drive Time</th>
@@ -1174,6 +1197,25 @@ const PropertyCalculator = () => {
                             </td>
                             <td className="px-5 py-3 text-gray-700 capitalize whitespace-nowrap">
                               {property.type || '-'}
+                            </td>
+                            <td className="px-5 py-3 text-center whitespace-nowrap">
+                              {property.bidDueDate ? (
+                                <div className={`text-sm ${
+                                  new Date(property.bidDueDate) < new Date() 
+                                    ? 'text-red-600 font-medium' 
+                                    : new Date(property.bidDueDate) < new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+                                    ? 'text-amber-600 font-medium'
+                                    : 'text-gray-700'
+                                }`}>
+                                  {new Date(property.bidDueDate).toLocaleDateString('en-US', { 
+                                    month: 'short', 
+                                    day: 'numeric',
+                                    year: 'numeric'
+                                  })}
+                                </div>
+                              ) : (
+                                <span className="text-gray-400">-</span>
+                              )}
                             </td>
                             <td className="px-5 py-3">
                               <div className="text-gray-900 font-medium">{property.market}</div>
