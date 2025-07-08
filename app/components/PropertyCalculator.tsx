@@ -349,7 +349,7 @@ const PropertyCalculator = () => {
             geocodeResult.location.lat,
             geocodeResult.location.lng,
             selectedBranchId,
-            1 // 1 mile radius
+            3 // 3 mile radius
           );
           
           if (proximityResult) {
