@@ -175,10 +175,10 @@ const PropertyCalculator = () => {
       if (field === 'market' && currentProperty.address) {
         // When region changes, recalculate for the new default branch
         const newBranch = BRANCHES[value as 'PHX' | 'LV'].branches[0].id;
-        calculateDriveTime(currentProperty.address, newBranch);
+        calculateDriveTime(currentProperty.address, newBranch, false);
       } else if (field === 'branch' && currentProperty.address) {
         // When branch changes directly, recalculate immediately
-        calculateDriveTime(currentProperty.address, value);
+        calculateDriveTime(currentProperty.address, value, false);
       }
     }
   };
@@ -262,7 +262,7 @@ const PropertyCalculator = () => {
     // Then recalculate drive time and find closest branch after a brief delay to ensure state has updated
     if (property.address && property.branch) {
       setTimeout(() => {
-        calculateDriveTime(property.address, property.branch);
+        calculateDriveTime(property.address, property.branch, false);
         // Also find the closest branch to show indicators (but don't update selection)
         findClosestBranch(property.address, false);
       }, 100);
@@ -294,7 +294,7 @@ const PropertyCalculator = () => {
   };
 
   // Calculate drive time from property to selected branch
-  const calculateDriveTime = async (propertyAddress?: string, branchId?: string) => {
+  const calculateDriveTime = async (propertyAddress?: string, branchId?: string, skipProximity?: boolean) => {
     const address = propertyAddress || currentProperty.address;
     const selectedBranchId = branchId || currentProperty.branch;
     
@@ -343,23 +343,39 @@ const PropertyCalculator = () => {
         const driveTimeHours = Math.round(distanceResult.durationHours * 10) / 10;
         setCalculatedDriveTime(driveTimeHours);
         
-        // Check for nearby properties if we have active properties
-        if (totalActiveProperties > 0) {
-          const proximityResult = await calculateProximity(
-            geocodeResult.location.lat,
-            geocodeResult.location.lng,
-            selectedBranchId,
-            3 // 3 mile radius
-          );
-          
-          if (proximityResult) {
-            const adjustedTime = Math.round(driveTimeHours * proximityResult.proximityFactor * 10) / 10;
-            setProximityData({
-              nearbyProperties: proximityResult.nearbyProperties,
-              proximityFactor: proximityResult.proximityFactor,
-              description: proximityResult.description,
-              adjustedDriveTime: adjustedTime
-            });
+        // Check for nearby properties - always try if not explicitly skipped
+        if (!skipProximity) {
+          console.log('Attempting proximity calculation. Total active properties:', totalActiveProperties);
+          try {
+            const proximityResult = await calculateProximity(
+              geocodeResult.location.lat,
+              geocodeResult.location.lng,
+              selectedBranchId,
+              3 // 3 mile radius
+            );
+            
+            console.log('Proximity result:', proximityResult);
+            
+            if (proximityResult && proximityResult.nearbyProperties && proximityResult.nearbyProperties.length > 0) {
+              const adjustedTime = Math.round(driveTimeHours * proximityResult.proximityFactor * 10) / 10;
+              setProximityData({
+                nearbyProperties: proximityResult.nearbyProperties,
+                proximityFactor: proximityResult.proximityFactor,
+                description: proximityResult.description,
+                adjustedDriveTime: adjustedTime
+              });
+              console.log('Proximity data set:', { 
+                nearbyCount: proximityResult.nearbyProperties.length,
+                factor: proximityResult.proximityFactor,
+                adjustedTime 
+              });
+            } else {
+              // Clear proximity data if no nearby properties
+              setProximityData(null);
+            }
+          } catch (proximityError) {
+            console.error('Proximity calculation error:', proximityError);
+            // Don't fail the whole operation if proximity fails
           }
         }
       } else {
@@ -416,6 +432,32 @@ const PropertyCalculator = () => {
           // Set the calculated drive time
           const driveTimeHours = Math.round(result.durationHours * 10) / 10;
           setCalculatedDriveTime(driveTimeHours);
+          
+          // Also calculate proximity for the closest branch
+          console.log('Calculating proximity for closest branch...');
+          try {
+            const proximityResult = await calculateProximity(
+              result.propertyLat,
+              result.propertyLng,
+              result.closestBranch.id,
+              3 // 3 mile radius
+            );
+            
+            if (proximityResult && proximityResult.nearbyProperties && proximityResult.nearbyProperties.length > 0) {
+              const adjustedTime = Math.round(driveTimeHours * proximityResult.proximityFactor * 10) / 10;
+              setProximityData({
+                nearbyProperties: proximityResult.nearbyProperties,
+                proximityFactor: proximityResult.proximityFactor,
+                description: proximityResult.description,
+                adjustedDriveTime: adjustedTime
+              });
+              console.log('Proximity data set from findClosestBranch');
+            } else {
+              setProximityData(null);
+            }
+          } catch (proximityError) {
+            console.error('Proximity calculation error in findClosestBranch:', proximityError);
+          }
           
           // Reset flag after updates
           setTimeout(() => {
@@ -483,6 +525,25 @@ const PropertyCalculator = () => {
       }
     };
   }, []);
+
+  // Retry proximity calculation when active properties load
+  useEffect(() => {
+    // Only retry if we have:
+    // 1. Active properties loaded
+    // 2. A current address
+    // 3. Calculated drive time
+    // 4. No proximity data yet
+    if (totalActiveProperties > 0 && 
+        currentProperty.address && 
+        currentProperty.branch &&
+        calculatedDriveTime !== null && 
+        !proximityData &&
+        !isCalculatingDistance) {
+      console.log('Active properties loaded, retrying proximity calculation...');
+      // Recalculate to get proximity data
+      calculateDriveTime(currentProperty.address, currentProperty.branch, false);
+    }
+  }, [totalActiveProperties]); // Only depend on totalActiveProperties changing
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -815,6 +876,14 @@ const PropertyCalculator = () => {
                               </span>
                             )}
                           </div>
+                          {/* Debug info - remove in production */}
+                          {process.env.NODE_ENV === 'development' && (
+                            <div className="text-xs text-gray-600">
+                              Active properties: {totalActiveProperties} | 
+                              Proximity data: {proximityData ? 'Yes' : 'No'} |
+                              {proximityData && ` Factor: ${proximityData.proximityFactor}`}
+                            </div>
+                          )}
                           {proximityData && proximityData.proximityFactor < 1 && (
                             <div className="pt-2 border-t border-green-200">
                               <div className="flex items-center justify-between">
@@ -1197,7 +1266,7 @@ const PropertyCalculator = () => {
                         return sum + monthlyPrice;
                       }, 0);
                       
-                      alert(`Total Monthly Revenue: ${totalMonthly.toLocaleString('en-US', { maximumFractionDigits: 0 })}\nAnnual Revenue: ${(totalMonthly * 12).toLocaleString('en-US', { maximumFractionDigits: 0 })}`);
+                      alert(`Total Monthly Revenue: $${totalMonthly.toLocaleString('en-US', { maximumFractionDigits: 0 })}\nAnnual Revenue: $${(totalMonthly * 12).toLocaleString('en-US', { maximumFractionDigits: 0 })}`);
                     }}
                     className="px-6"
                   >
