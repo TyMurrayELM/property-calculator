@@ -89,7 +89,7 @@ export function useActiveProperties() {
     }
   };
 
-  // Calculate proximity for a given location
+  // Calculate proximity for a given location - UPDATED VERSION
   const calculateProximity = async (
     lat: number, 
     lng: number, 
@@ -97,16 +97,25 @@ export function useActiveProperties() {
     radiusMiles: number = 1
   ): Promise<ProximityResult | null> => {
     try {
+      // Validate inputs before sending
+      if (!lat || !lng || !branch) {
+        console.error('Missing required parameters for proximity calculation:', { lat, lng, branch });
+        return null;
+      }
+
       const response = await fetch('/api/active-properties', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lat, lng, branch, radiusMiles })
       });
       
-      if (response.ok) {
-        return await response.json();
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Proximity calculation failed:', response.status, errorText);
+        return null;
       }
-      return null;
+      
+      return await response.json();
     } catch (error) {
       console.error('Error calculating proximity:', error);
       return null;

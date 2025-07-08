@@ -411,26 +411,38 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Get nearby properties for proximity calculation
+// Get nearby properties for proximity calculation - UPDATED VERSION
 export async function PUT(request: NextRequest) {
   try {
-    const { lat, lng, branch, radiusMiles = 1 } = await request.json();
+    const body = await request.json();
+    const { lat, lng, branch, radiusMiles = 1 } = body;
     
-    if (!lat || !lng) {
-      return NextResponse.json({ error: 'Latitude and longitude required' }, { status: 400 });
+    // Validate all required parameters
+    if (!lat || !lng || !branch) {
+      console.error('Missing parameters:', { lat, lng, branch });
+      return NextResponse.json({ 
+        error: 'Missing required parameters: lat, lng, and branch are all required' 
+      }, { status: 400 });
     }
+    
+    // Ensure branch is a string
+    const branchStr = String(branch).toLowerCase();
+    
+    console.log('Proximity calculation request:', { lat, lng, branch: branchStr, radiusMiles });
     
     // Fetch all active properties for the same branch
     const { data: properties, error } = await supabase
       .from('active_properties')
       .select('*')
       .eq('is_active', true)
-      .eq('branch', branch.toLowerCase());
+      .eq('branch', branchStr);
     
     if (error) {
       console.error('Error fetching properties:', error);
       return NextResponse.json({ error: 'Failed to fetch properties' }, { status: 500 });
     }
+    
+    console.log(`Found ${properties?.length || 0} properties for branch ${branchStr}`);
     
     // Calculate distances and filter by radius
     const nearbyProperties = properties?.map(property => {
@@ -450,32 +462,40 @@ export async function PUT(request: NextRequest) {
         distance: Math.round(distance * 100) / 100
       };
     }).filter(p => p.distance <= radiusMiles)
-      .sort((a, b) => a.distance - b.distance);
+      .sort((a, b) => a.distance - b.distance) || [];
     
     // Calculate proximity factor
-    const count = nearbyProperties?.length || 0;
+    const count = nearbyProperties.length;
     let proximityFactor = 1.0; // Default: no reduction
     let description = 'Isolated property';
     
-    if (count >= 5) {
+    if (count >= 10) {
       proximityFactor = 0.25;
       description = `Dense route - ${count} properties within ${radiusMiles} mile${radiusMiles > 1 ? 's' : ''}`;
-    } else if (count >= 3) {
+    } else if (count >= 5) {
       proximityFactor = 0.5;
+      description = `Good route density - ${count} properties within ${radiusMiles} mile${radiusMiles > 1 ? 's' : ''}`;
+    } else if (count >= 3) {
+      proximityFactor = 0.7;
       description = `Moderate route - ${count} properties within ${radiusMiles} mile${radiusMiles > 1 ? 's' : ''}`;
     } else if (count >= 1) {
-      proximityFactor = 0.75;
+      proximityFactor = 0.85;
       description = `Light route - ${count} propert${count === 1 ? 'y' : 'ies'} within ${radiusMiles} mile${radiusMiles > 1 ? 's' : ''}`;
     }
     
+    console.log(`Proximity calculation complete: ${count} nearby properties, factor: ${proximityFactor}`);
+    
     return NextResponse.json({
-      nearbyProperties: nearbyProperties || [],
+      nearbyProperties,
       proximityFactor,
       description,
       count
     });
   } catch (error) {
     console.error('Proximity calculation error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ 
+      error: 'Failed to calculate proximity',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
   }
 }

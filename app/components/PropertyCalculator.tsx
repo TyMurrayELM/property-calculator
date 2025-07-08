@@ -437,8 +437,8 @@ const PropertyCalculator = () => {
           console.log('Calculating proximity for closest branch...');
           try {
             const proximityResult = await calculateProximity(
-              result.propertyLat,
-              result.propertyLng,
+              result.propertyLocation.lat,  // Fixed: use propertyLocation.lat
+              result.propertyLocation.lng,  // Fixed: use propertyLocation.lng
               result.closestBranch.id,
               3 // 3 mile radius
             );
