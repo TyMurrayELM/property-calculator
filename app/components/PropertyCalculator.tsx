@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Save, FileDown, Building2, Calculator, TreePine, MapPin, Navigation, Loader2, CheckCircle, ChevronDown, ChevronUp, Map, Trash2, AlertCircle, Car, Table, Upload, Users, Calendar } from 'lucide-react';
+import { Save, FileDown, Building2, Calculator, TreePine, MapPin, Navigation, Loader2, CheckCircle, ChevronDown, ChevronUp, Map, Trash2, AlertCircle, Car, Table, Upload, Users, Calendar, FileText } from 'lucide-react';
 import MaintenanceCalculator from './MaintenanceCalculator';
 import LandscapingEstimator from './LandscapingEstimator';
 import dynamic from 'next/dynamic';
@@ -98,6 +98,8 @@ export interface Property {
   totalLandscapeHours?: number;
   calculatedDriveTime?: number | null;
   bidDueDate?: string | null;
+  status?: string;
+  notes?: string;
   savedAt?: Date;
 }
 
@@ -108,7 +110,9 @@ const PropertyCalculator = () => {
     type: '',
     market: 'PHX',
     branch: 'phx-sw',
-    bidDueDate: null
+    bidDueDate: null,
+    status: 'New',
+    notes: ''
   });
 
   const [landscapeHours, setLandscapeHours] = useState<number>(0);
@@ -125,6 +129,7 @@ const PropertyCalculator = () => {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [propertyToDelete, setPropertyToDelete] = useState<string | null>(null);
   const [showPropertiesTable, setShowPropertiesTable] = useState(false);
+  const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
   const [isFindingClosestBranch, setIsFindingClosestBranch] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [proximityData, setProximityData] = useState<{
@@ -204,7 +209,9 @@ const PropertyCalculator = () => {
         calculatedDriveTime: calculatedDriveTime,
         landscapeData: landscapeFormData,
         maintenanceData: maintenanceFormData,
-        bidDueDate: currentProperty.bidDueDate
+        bidDueDate: currentProperty.bidDueDate,
+        status: currentProperty.status || 'New',
+        notes: currentProperty.notes || ''
       };
 
       await saveToSupabase(propertyToSave);
@@ -232,7 +239,9 @@ const PropertyCalculator = () => {
           type: '',
           market: 'PHX',
           branch: 'phx-sw',
-          bidDueDate: null
+          bidDueDate: null,
+          status: 'New',
+          notes: ''
         });
         setLandscapeHours(0);
         setCalculatedDriveTime(null);
@@ -248,7 +257,9 @@ const PropertyCalculator = () => {
   const loadProperty = (property: Property) => {
     setCurrentProperty({
       ...property,
-      bidDueDate: property.bidDueDate || null
+      bidDueDate: property.bidDueDate || null,
+      status: property.status || 'New',
+      notes: property.notes || ''
     });
     if (property.totalLandscapeHours) {
       setLandscapeHours(property.totalLandscapeHours);
@@ -284,6 +295,8 @@ const PropertyCalculator = () => {
       landscapeFormData,
       maintenanceFormData,
       bidDueDate: currentProperty.bidDueDate,
+      status: currentProperty.status,
+      notes: currentProperty.notes,
       exportDate: new Date().toISOString()
     }, null, 2);
     
@@ -682,6 +695,7 @@ const PropertyCalculator = () => {
                   <span className="text-sm text-gray-500 ml-2">
                     {currentProperty.name}
                     {currentProperty.type && ` • ${currentProperty.type}`}
+                    {currentProperty.status && currentProperty.status !== 'New' && ` • ${currentProperty.status}`}
                     {currentProperty.bidDueDate && ` • Due: ${new Date(currentProperty.bidDueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
                     {getCurrentBranch() && ` • ${getCurrentBranch()?.name}`}
                   </span>
@@ -725,18 +739,6 @@ const PropertyCalculator = () => {
                       <SelectItem value="resort">Resort</SelectItem>
                     </SelectContent>
                   </Select>
-                </div>
-                <div>
-                  <Label className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4" />
-                    Bid Due Date
-                  </Label>
-                  <Input
-                    type="date"
-                    value={currentProperty.bidDueDate || ''}
-                    onChange={(e) => handlePropertyChange('bidDueDate', e.target.value || null)}
-                    className="mt-1"
-                  />
                 </div>
                 <div>
                   <Label>Region</Label>
@@ -873,6 +875,53 @@ const PropertyCalculator = () => {
                 {distanceError && (
                   <p className="text-sm text-red-500 mt-1">{distanceError}</p>
                 )}
+                
+                {/* Additional fields shown after address is entered */}
+                {currentProperty.address && currentProperty.address.trim().length > 0 && (
+                  <div className="mt-6 pt-6 border-t border-gray-200 animate-in fade-in-50 duration-500">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                      <div>
+                        <Label className="flex items-center gap-2">
+                          <Calendar className="h-4 w-4" />
+                          Bid Due Date
+                        </Label>
+                        <Input
+                          type="date"
+                          value={currentProperty.bidDueDate || ''}
+                          onChange={(e) => handlePropertyChange('bidDueDate', e.target.value || null)}
+                          className="mt-1"
+                        />
+                      </div>
+                      <div>
+                        <Label>Status</Label>
+                        <Select
+                          value={currentProperty.status || 'New'}
+                          onValueChange={(value) => handlePropertyChange('status', value)}
+                        >
+                          <SelectTrigger className="mt-1">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="New">New</SelectItem>
+                            <SelectItem value="Estimating">Estimating</SelectItem>
+                            <SelectItem value="Finalizing">Finalizing</SelectItem>
+                            <SelectItem value="Proposed">Proposed</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div>
+                      <Label>Notes</Label>
+                      <textarea
+                        value={currentProperty.notes || ''}
+                        onChange={(e) => handlePropertyChange('notes', e.target.value)}
+                        placeholder="Add any additional notes about this property..."
+                        className="w-full mt-1 p-2 border rounded min-h-[80px] resize-y"
+                      />
+                    </div>
+                  </div>
+                )}
+                
                 {/* Success message when closest branch is found */}
                 {suggestedBranch && currentProperty.branch === suggestedBranch && calculatedDriveTime !== null && !isCalculatingDistance && !isFindingClosestBranch && (
                   <Alert className="mt-2 border-green-500 bg-green-50">
@@ -1114,7 +1163,12 @@ const PropertyCalculator = () => {
         </Tabs>
 
         {/* Properties Table Dialog */}
-        <Dialog open={showPropertiesTable} onOpenChange={setShowPropertiesTable}>
+        <Dialog open={showPropertiesTable} onOpenChange={(open) => {
+          setShowPropertiesTable(open);
+          if (!open) {
+            setExpandedNotes(new Set());
+          }
+        }}>
           <DialogContent className="!max-w-[95vw] max-h-[90vh] overflow-hidden flex flex-col">
             <DialogHeader className="pb-3">
               <DialogTitle className="text-2xl">Saved Property Estimates</DialogTitle>
@@ -1135,21 +1189,24 @@ const PropertyCalculator = () => {
                 <div className="overflow-x-auto w-full">
                   <table className="w-full text-sm table-fixed">
                     <colgroup>
-                      <col className="w-[25%]" />
+                      <col className="w-[20%]" />
                       <col className="w-[7%]" />
+                      <col className="w-[8%]" />
                       <col className="w-[8%]" />
                       <col className="w-[11%]" />
-                      <col className="w-[8%]" />
-                      <col className="w-[8%]" />
-                      <col className="w-[10%]" />
                       <col className="w-[7%]" />
+                      <col className="w-[7%]" />
+                      <col className="w-[9%]" />
                       <col className="w-[6%]" />
-                      <col className="w-[10%]" />
+                      <col className="w-[6%]" />
+                      <col className="w-[5%]" />
+                      <col className="w-[6%]" />
                     </colgroup>
                     <thead className="bg-gray-100 sticky top-0 border-b border-gray-300 shadow-sm z-10">
                       <tr>
                         <th className="px-5 py-3 text-left font-semibold text-gray-900">Property</th>
                         <th className="px-5 py-3 text-left font-semibold text-gray-900">Type</th>
+                        <th className="px-5 py-3 text-center font-semibold text-gray-900">Status</th>
                         <th className="px-5 py-3 text-center font-semibold text-gray-900">Bid Due</th>
                         <th className="px-5 py-3 text-left font-semibold text-gray-900">Region/Branch</th>
                         <th className="px-5 py-3 text-right font-semibold text-gray-900">Weekly Hours</th>
@@ -1157,6 +1214,7 @@ const PropertyCalculator = () => {
                         <th className="px-5 py-3 text-right font-semibold text-gray-900">Monthly Price</th>
                         <th className="px-5 py-3 text-center font-semibold text-gray-900">Margin %</th>
                         <th className="px-5 py-3 text-center font-semibold text-gray-900">Saved</th>
+                        <th className="px-5 py-3 text-center font-semibold text-gray-900">Notes</th>
                         <th className="px-5 py-3 text-center font-semibold text-gray-900">Actions</th>
                       </tr>
                     </thead>
@@ -1185,94 +1243,143 @@ const PropertyCalculator = () => {
                         const branchName = [...BRANCHES.PHX.branches, ...BRANCHES.LV.branches]
                           .find(b => b.id === property.branch)?.name || property.branch || '-';
                         
+                        const hasNotes = property.notes && property.notes.trim().length > 0;
+                        const isNotesExpanded = expandedNotes.has(property.id!);
+                        
                         return (
-                          <tr key={property.id} className={`hover:bg-gray-100 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
-                            <td className="px-5 py-3 overflow-hidden">
-                              <div className="font-medium text-gray-900 whitespace-nowrap overflow-hidden text-ellipsis pr-2">{property.name}</div>
-                              {property.address && (
-                                <div className="text-xs text-gray-500 mt-0.5 whitespace-nowrap overflow-hidden text-ellipsis pr-2">
-                                  {property.address}
-                                </div>
-                              )}
-                            </td>
-                            <td className="px-5 py-3 text-gray-700 capitalize whitespace-nowrap">
-                              {property.type || '-'}
-                            </td>
-                            <td className="px-5 py-3 text-center whitespace-nowrap">
-                              {property.bidDueDate ? (
-                                <div className={`text-sm ${
-                                  new Date(property.bidDueDate) < new Date() 
-                                    ? 'text-red-600 font-medium' 
-                                    : new Date(property.bidDueDate) < new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-                                    ? 'text-amber-600 font-medium'
-                                    : 'text-gray-700'
+                          <React.Fragment key={property.id}>
+                            <tr className={`hover:bg-gray-100 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
+                              <td className="px-5 py-3 overflow-hidden">
+                                <div className="font-medium text-gray-900 whitespace-nowrap overflow-hidden text-ellipsis pr-2">{property.name}</div>
+                                {property.address && (
+                                  <div className="text-xs text-gray-500 mt-0.5 whitespace-nowrap overflow-hidden text-ellipsis pr-2">
+                                    {property.address}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="px-5 py-3 text-gray-700 capitalize whitespace-nowrap">
+                                {property.type || '-'}
+                              </td>
+                              <td className="px-5 py-3 text-center">
+                                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                  property.status === 'Proposed' ? 'bg-green-100 text-green-800' :
+                                  property.status === 'Finalizing' ? 'bg-blue-100 text-blue-800' :
+                                  property.status === 'Estimating' ? 'bg-yellow-100 text-yellow-800' :
+                                  'bg-gray-100 text-gray-800'
                                 }`}>
-                                  {new Date(property.bidDueDate).toLocaleDateString('en-US', { 
-                                    month: 'short', 
-                                    day: 'numeric',
-                                    year: 'numeric'
-                                  })}
+                                  {property.status || 'New'}
+                                </span>
+                              </td>
+                              <td className="px-5 py-3 text-center whitespace-nowrap">
+                                {property.bidDueDate ? (
+                                  <div className={`text-sm ${
+                                    new Date(property.bidDueDate) < new Date() 
+                                      ? 'text-red-600 font-medium' 
+                                      : new Date(property.bidDueDate) < new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+                                      ? 'text-amber-600 font-medium'
+                                      : 'text-gray-700'
+                                  }`}>
+                                    {new Date(property.bidDueDate).toLocaleDateString('en-US', { 
+                                      month: 'short', 
+                                      day: 'numeric',
+                                      year: 'numeric'
+                                    })}
+                                  </div>
+                                ) : (
+                                  <span className="text-gray-400">-</span>
+                                )}
+                              </td>
+                              <td className="px-5 py-3">
+                                <div className="text-gray-900 font-medium">{property.market}</div>
+                                <div className="text-xs text-gray-500">{branchName}</div>
+                              </td>
+                              <td className="px-5 py-3 text-right text-gray-900 font-medium text-sm whitespace-nowrap">
+                                {property.totalLandscapeHours?.toFixed(1) || '-'}
+                              </td>
+                              <td className="px-5 py-3 text-right text-gray-900 text-sm whitespace-nowrap">
+                                {property.calculatedDriveTime !== null && property.calculatedDriveTime !== undefined
+                                  ? `${property.calculatedDriveTime.toFixed(1)} hrs`
+                                  : '-'}
+                              </td>
+                              <td className="px-5 py-3 text-right font-semibold text-gray-900 text-base whitespace-nowrap">
+                                ${monthlyPrice.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                              </td>
+                              <td className="px-5 py-3 text-center">
+                                <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
+                                  margin >= 60 ? 'bg-green-100 text-green-800' :
+                                  margin >= 50 ? 'bg-yellow-100 text-yellow-800' :
+                                  'bg-red-100 text-red-800'
+                                }`}>
+                                  {margin}%
+                                </span>
+                              </td>
+                              <td className="px-5 py-3 text-gray-600 text-center text-sm whitespace-nowrap">
+                                {property.savedAt 
+                                  ? new Date(property.savedAt).toLocaleDateString()
+                                  : '-'}
+                              </td>
+                              <td className="px-5 py-3 text-center">
+                                {hasNotes ? (
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => {
+                                      setExpandedNotes(prev => {
+                                        const newSet = new Set(prev);
+                                        if (newSet.has(property.id!)) {
+                                          newSet.delete(property.id!);
+                                        } else {
+                                          newSet.add(property.id!);
+                                        }
+                                        return newSet;
+                                      });
+                                    }}
+                                    className="p-1"
+                                  >
+                                    <FileText className={`h-4 w-4 ${isNotesExpanded ? 'text-blue-600' : 'text-gray-500'}`} />
+                                  </Button>
+                                ) : (
+                                  <span className="text-gray-300">-</span>
+                                )}
+                              </td>
+                              <td className="px-5 py-3">
+                                <div className="flex items-center justify-center gap-2 whitespace-nowrap">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      loadProperty(property);
+                                      setShowPropertiesTable(false);
+                                    }}
+                                    className="px-4 py-1.5"
+                                  >
+                                    Load
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setPropertyToDelete(property.id!);
+                                      setShowDeleteDialog(true);
+                                    }}
+                                    className="px-3 py-1.5"
+                                  >
+                                    <Trash2 className="h-4 w-4 text-red-500" />
+                                  </Button>
                                 </div>
-                              ) : (
-                                <span className="text-gray-400">-</span>
-                              )}
-                            </td>
-                            <td className="px-5 py-3">
-                              <div className="text-gray-900 font-medium">{property.market}</div>
-                              <div className="text-xs text-gray-500">{branchName}</div>
-                            </td>
-                            <td className="px-5 py-3 text-right text-gray-900 font-medium text-sm whitespace-nowrap">
-                              {property.totalLandscapeHours?.toFixed(1) || '-'}
-                            </td>
-                            <td className="px-5 py-3 text-right text-gray-900 text-sm whitespace-nowrap">
-                              {property.calculatedDriveTime !== null && property.calculatedDriveTime !== undefined
-                                ? `${property.calculatedDriveTime.toFixed(1)} hrs`
-                                : '-'}
-                            </td>
-                            <td className="px-5 py-3 text-right font-semibold text-gray-900 text-base whitespace-nowrap">
-                              ${monthlyPrice.toLocaleString('en-US', { maximumFractionDigits: 0 })}
-                            </td>
-                            <td className="px-5 py-3 text-center">
-                              <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
-                                margin >= 60 ? 'bg-green-100 text-green-800' :
-                                margin >= 50 ? 'bg-yellow-100 text-yellow-800' :
-                                'bg-red-100 text-red-800'
-                              }`}>
-                                {margin}%
-                              </span>
-                            </td>
-                            <td className="px-5 py-3 text-gray-600 text-center text-sm whitespace-nowrap">
-                              {property.savedAt 
-                                ? new Date(property.savedAt).toLocaleDateString()
-                                : '-'}
-                            </td>
-                            <td className="px-5 py-3">
-                              <div className="flex items-center justify-center gap-2 whitespace-nowrap">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => {
-                                    loadProperty(property);
-                                    setShowPropertiesTable(false);
-                                  }}
-                                  className="px-4 py-1.5"
-                                >
-                                  Load
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => {
-                                    setPropertyToDelete(property.id!);
-                                    setShowDeleteDialog(true);
-                                  }}
-                                  className="px-3 py-1.5"
-                                >
-                                  <Trash2 className="h-4 w-4 text-red-500" />
-                                </Button>
-                              </div>
-                            </td>
-                          </tr>
+                              </td>
+                            </tr>
+                            {isNotesExpanded && (
+                              <tr className={`${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
+                                <td colSpan={12} className="px-5 py-3 border-t">
+                                  <div className="bg-blue-50 p-3 rounded-lg">
+                                    <div className="text-sm font-medium text-blue-900 mb-1">Notes:</div>
+                                    <div className="text-sm text-gray-700 whitespace-pre-wrap">{property.notes}</div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
                         );
                       })}
                     </tbody>

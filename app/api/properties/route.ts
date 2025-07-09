@@ -44,7 +44,9 @@ export async function POST(request: NextRequest) {
         maintenance_data: property.maintenanceData,
         total_landscape_hours: property.totalLandscapeHours,
         calculated_drive_time: property.calculatedDriveTime,
-        bid_due_date: property.bidDueDate
+        bid_due_date: property.bidDueDate,
+        status: property.status,
+        notes: property.notes
       })
       .select()
       .single();
@@ -83,6 +85,8 @@ export async function PUT(request: NextRequest) {
         total_landscape_hours: property.totalLandscapeHours,
         calculated_drive_time: property.calculatedDriveTime,
         bid_due_date: property.bidDueDate,
+        status: property.status,
+        notes: property.notes,
         updated_at: new Date().toISOString()
       })
       .eq('id', property.id)

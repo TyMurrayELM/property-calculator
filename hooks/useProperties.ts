@@ -35,6 +35,8 @@ export const useProperties = () => {
         totalLandscapeHours: p.total_landscape_hours,
         calculatedDriveTime: p.calculated_drive_time,
         bidDueDate: p.bid_due_date,
+        status: p.status,
+        notes: p.notes,
         savedAt: new Date(p.updated_at)
       }));
       
@@ -75,6 +77,8 @@ export const useProperties = () => {
         totalLandscapeHours: data.property.total_landscape_hours,
         calculatedDriveTime: data.property.calculated_drive_time,
         bidDueDate: data.property.bid_due_date,
+        status: data.property.status,
+        notes: data.property.notes,
         savedAt: new Date(data.property.updated_at)
       };
       

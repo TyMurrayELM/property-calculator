@@ -23,6 +23,8 @@ export interface Database {
           total_landscape_hours: number | null
           calculated_drive_time: number | null
           bid_due_date: string | null
+          status: string | null
+          notes: string | null
           created_at: string
           updated_at: string
         }
@@ -38,6 +40,8 @@ export interface Database {
           total_landscape_hours?: number | null
           calculated_drive_time?: number | null
           bid_due_date?: string | null
+          status?: string | null
+          notes?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -53,6 +57,8 @@ export interface Database {
           total_landscape_hours?: number | null
           calculated_drive_time?: number | null
           bid_due_date?: string | null
+          status?: string | null
+          notes?: string | null
           created_at?: string
           updated_at?: string
         }
