@@ -13,6 +13,7 @@ import LandscapingEstimator from './LandscapingEstimator';
 import dynamic from 'next/dynamic';
 import { useProperties } from '@/hooks/useProperties';
 import { useActiveProperties } from '@/hooks/useActiveProperties';
+import { UserMenu } from './UserMenu';
 
 // Dynamically import RouteMap to avoid SSR issues
 const RouteMap = dynamic(() => import('./RouteMap'), {
@@ -644,6 +645,7 @@ const PropertyCalculator = () => {
                   </div>
                 </DialogContent>
               </Dialog>
+              <UserMenu />
             </div>
           </div>
         </div>
