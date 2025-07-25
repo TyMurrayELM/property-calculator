@@ -194,15 +194,6 @@ export const authOptions: NextAuthOptions = {
   }
 };
 
-// Additional error logging for the handler
-try {
-  const handler = NextAuth(authOptions);
-  console.log('NextAuth handler created successfully');
-  module.exports = { GET: handler, POST: handler };
-} catch (error) {
-  console.error('CRITICAL: Failed to create NextAuth handler:', error);
-  throw error;
-}
-
 const handler = NextAuth(authOptions);
+
 export { handler as GET, handler as POST };
