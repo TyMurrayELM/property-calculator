@@ -86,7 +86,7 @@ export const authOptions: NextAuthOptions = {
         
         const { data: allowedUser, error } = await supabase
           .from('allowed_users')
-          .select('email, is_active, role')
+          .select('email, is_active, role, login_count')
           .eq('email', email)
           .eq('is_active', true)
           .single();
@@ -112,6 +112,26 @@ export const authOptions: NextAuthOptions = {
         }
         
         console.log(`SIGN IN ALLOWED: ${email} (role: ${allowedUser.role})`);
+        
+        // Update last login time and increment login count
+        try {
+          const { error: updateError } = await supabase
+            .from('allowed_users')
+            .update({ 
+              last_login: new Date().toISOString(),
+              login_count: (allowedUser.login_count || 0) + 1
+            })
+            .eq('email', email);
+            
+          if (updateError) {
+            console.error('Failed to update last login:', updateError);
+          } else {
+            console.log('Updated last login for:', email);
+          }
+        } catch (error) {
+          console.error('Error updating last login:', error);
+        }
+        
         return true;
       } catch (error) {
         console.error('ERROR checking allowlist:', error);

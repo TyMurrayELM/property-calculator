@@ -7,9 +7,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Trash2, UserPlus, Shield, Loader2, AlertCircle } from 'lucide-react';
+import { Trash2, UserPlus, Shield, Loader2, AlertCircle, Clock, LogIn, Calendar, Users, ArrowLeft } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
-import { redirect } from 'next/navigation';
+import Link from 'next/link';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -25,6 +25,8 @@ interface AllowedUser {
   added_at: string;
   is_active: boolean;
   notes?: string;
+  last_login?: string;
+  login_count?: number;
 }
 
 export default function AdminPage() {
@@ -49,7 +51,7 @@ export default function AdminPage() {
       const { data, error } = await supabase
         .from('allowed_users')
         .select('*')
-        .order('email');
+        .order('last_login', { ascending: false, nullsFirst: false });
       
       if (error) throw error;
       setUsers(data || []);
@@ -126,6 +128,40 @@ export default function AdminPage() {
     }
   };
 
+  const formatLastLogin = (lastLogin: string | null | undefined) => {
+    if (!lastLogin) return 'Never';
+    
+    const date = new Date(lastLogin);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins} min${diffMins > 1 ? 's' : ''} ago`;
+    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+    if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+    
+    return date.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric',
+      year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined
+    });
+  };
+
+  const getActivityStatus = (lastLogin: string | null | undefined) => {
+    if (!lastLogin) return 'inactive';
+    
+    const date = new Date(lastLogin);
+    const daysSinceLogin = (new Date().getTime() - date.getTime()) / 86400000;
+    
+    if (daysSinceLogin < 1) return 'active';
+    if (daysSinceLogin < 7) return 'recent';
+    if (daysSinceLogin < 30) return 'moderate';
+    return 'inactive';
+  };
+
   if (status === 'loading') {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -150,12 +186,65 @@ export default function AdminPage() {
     );
   }
 
+  // Calculate stats
+  const activeUsers = users.filter(u => u.is_active).length;
+  const recentlyActive = users.filter(u => {
+    if (!u.last_login) return false;
+    const daysSince = (new Date().getTime() - new Date(u.last_login).getTime()) / 86400000;
+    return daysSince < 7;
+  }).length;
+
   return (
     <div className="min-h-screen bg-gray-50 p-4">
-      <div className="max-w-6xl mx-auto">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">User Allowlist Management</h1>
-          <p className="text-gray-600 mt-2">Control who can access the Property Calculator</p>
+      <div className="max-w-7xl mx-auto">
+        <div className="mb-8 flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">User Allowlist Management</h1>
+            <p className="text-gray-600 mt-2">Control who can access the Property Calculator</p>
+          </div>
+          <Link href="/">
+            <Button variant="outline">
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to Calculator
+            </Button>
+          </Link>
+        </div>
+
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Total Users</p>
+                  <p className="text-2xl font-bold text-gray-900">{users.length}</p>
+                </div>
+                <Users className="h-8 w-8 text-gray-400" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Active Users</p>
+                  <p className="text-2xl font-bold text-green-600">{activeUsers}</p>
+                </div>
+                <Shield className="h-8 w-8 text-green-400" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Active This Week</p>
+                  <p className="text-2xl font-bold text-blue-600">{recentlyActive}</p>
+                </div>
+                <Clock className="h-8 w-8 text-blue-400" />
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Add User Form */}
@@ -235,58 +324,95 @@ export default function AdminPage() {
                 <table className="w-full">
                   <thead className="border-b">
                     <tr>
-                      <th className="text-left p-2">Email</th>
-                      <th className="text-left p-2">Name</th>
+                      <th className="text-left p-2">User</th>
                       <th className="text-left p-2">Role</th>
                       <th className="text-left p-2">Status</th>
-                      <th className="text-left p-2">Added By</th>
-                      <th className="text-left p-2">Added On</th>
+                      <th className="text-left p-2">Last Login</th>
+                      <th className="text-left p-2">Logins</th>
+                      <th className="text-left p-2">Added</th>
                       <th className="text-center p-2">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {users.map((user) => (
-                      <tr key={user.id} className="border-b hover:bg-gray-50">
-                        <td className="p-2">{user.email}</td>
-                        <td className="p-2">{user.name}</td>
-                        <td className="p-2">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            user.role === 'admin' 
-                              ? 'bg-purple-100 text-purple-700' 
-                              : 'bg-gray-100 text-gray-700'
-                          }`}>
-                            {user.role}
-                          </span>
-                        </td>
-                        <td className="p-2">
-                          <button
-                            onClick={() => toggleUserStatus(user)}
-                            className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              user.is_active 
-                                ? 'bg-green-100 text-green-700' 
-                                : 'bg-red-100 text-red-700'
-                            }`}
-                          >
-                            {user.is_active ? 'Active' : 'Inactive'}
-                          </button>
-                        </td>
-                        <td className="p-2 text-sm text-gray-600">{user.added_by}</td>
-                        <td className="p-2 text-sm text-gray-600">
-                          {new Date(user.added_at).toLocaleDateString()}
-                        </td>
-                        <td className="p-2 text-center">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => deleteUser(user.id)}
-                            disabled={user.email === session?.user?.email}
-                            title={user.email === session?.user?.email ? "Can't delete yourself" : 'Delete user'}
-                          >
-                            <Trash2 className="h-4 w-4 text-red-500" />
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
+                    {users.map((user) => {
+                      const activityStatus = getActivityStatus(user.last_login);
+                      return (
+                        <tr key={user.id} className="border-b hover:bg-gray-50">
+                          <td className="p-2">
+                            <div className="flex items-center gap-3">
+                              <div className={`h-2 w-2 rounded-full ${
+                                activityStatus === 'active' ? 'bg-green-500' :
+                                activityStatus === 'recent' ? 'bg-blue-500' :
+                                activityStatus === 'moderate' ? 'bg-yellow-500' :
+                                'bg-gray-300'
+                              }`} />
+                              <div>
+                                <div className="font-medium">{user.name}</div>
+                                <div className="text-sm text-gray-500">{user.email}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="p-2">
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                              user.role === 'admin' 
+                                ? 'bg-purple-100 text-purple-700' 
+                                : 'bg-gray-100 text-gray-700'
+                            }`}>
+                              {user.role}
+                            </span>
+                          </td>
+                          <td className="p-2">
+                            <button
+                              onClick={() => toggleUserStatus(user)}
+                              className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                user.is_active 
+                                  ? 'bg-green-100 text-green-700' 
+                                  : 'bg-red-100 text-red-700'
+                              }`}
+                            >
+                              {user.is_active ? 'Active' : 'Inactive'}
+                            </button>
+                          </td>
+                          <td className="p-2">
+                            <div className="flex items-center gap-2 text-sm">
+                              <Clock className="h-4 w-4 text-gray-400" />
+                              <span className={
+                                activityStatus === 'active' ? 'text-green-600 font-medium' :
+                                activityStatus === 'recent' ? 'text-blue-600' :
+                                'text-gray-600'
+                              }>
+                                {formatLastLogin(user.last_login)}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="p-2 text-center">
+                            <div className="flex items-center gap-1">
+                              <LogIn className="h-4 w-4 text-gray-400" />
+                              <span className="text-sm text-gray-600">{user.login_count || 0}</span>
+                            </div>
+                          </td>
+                          <td className="p-2">
+                            <div className="text-sm text-gray-600">
+                              <div>{user.added_by}</div>
+                              <div className="text-xs text-gray-400">
+                                {new Date(user.added_at).toLocaleDateString()}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="p-2 text-center">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => deleteUser(user.id)}
+                              disabled={user.email === session?.user?.email}
+                              title={user.email === session?.user?.email ? "Can't delete yourself" : 'Delete user'}
+                            >
+                              <Trash2 className="h-4 w-4 text-red-500" />
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
