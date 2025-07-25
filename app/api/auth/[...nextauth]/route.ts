@@ -3,13 +3,20 @@ import GoogleProvider from 'next-auth/providers/google';
 import type { NextAuthOptions } from 'next-auth';
 import { createClient } from '@supabase/supabase-js';
 
-// Initialize Supabase client for server-side use
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! // Note: using service role key for server-side
-);
-
 const allowedDomains = process.env.ALLOWED_DOMAINS?.split(',') || [];
+
+// Helper function to get Supabase client
+const getSupabaseClient = () => {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  
+  if (!supabaseUrl || !supabaseKey) {
+    console.error('Supabase configuration missing');
+    return null;
+  }
+  
+  return createClient(supabaseUrl, supabaseKey);
+};
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -34,7 +41,16 @@ export const authOptions: NextAuthOptions = {
         return false;
       }
       
-      // Then check if user is in the allowlist table
+      // Get Supabase client
+      const supabase = getSupabaseClient();
+      
+      // If Supabase is not configured, fall back to domain-only check
+      if (!supabase) {
+        console.warn('Supabase not configured, using domain-only authentication');
+        return true; // Allow if domain matches
+      }
+      
+      // Check if user is in the allowlist table
       try {
         const { data: allowedUser, error } = await supabase
           .from('allowed_users')
@@ -58,18 +74,22 @@ export const authOptions: NextAuthOptions = {
     async session({ session, token }) {
       // Optionally add user role to session
       if (session.user?.email) {
-        try {
-          const { data: userData } = await supabase
-            .from('allowed_users')
-            .select('role')
-            .eq('email', session.user.email)
-            .single();
-          
-          if (userData) {
-            session.user.role = userData.role;
+        const supabase = getSupabaseClient();
+        
+        if (supabase) {
+          try {
+            const { data: userData } = await supabase
+              .from('allowed_users')
+              .select('role')
+              .eq('email', session.user.email)
+              .single();
+            
+            if (userData) {
+              session.user.role = userData.role;
+            }
+          } catch (error) {
+            console.error('Error fetching user role:', error);
           }
-        } catch (error) {
-          console.error('Error fetching user role:', error);
         }
       }
       return session;
