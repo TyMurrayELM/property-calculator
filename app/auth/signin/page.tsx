@@ -13,6 +13,30 @@ function SignInContent() {
   const callbackUrl = searchParams.get('callbackUrl') || '/';
   const error = searchParams.get('error');
 
+  // More detailed error messages
+  const getErrorMessage = (error: string | null) => {
+    if (!error) return null;
+    
+    const errorMessages: Record<string, string> = {
+      'OAuthSignin': 'Failed to start OAuth sign-in process. Check your OAuth configuration.',
+      'OAuthCallback': 'OAuth callback failed. This usually means invalid credentials or redirect URI mismatch.',
+      'OAuthCreateAccount': 'Failed to create account. Your email might not be allowed.',
+      'EmailCreateAccount': 'Failed to create account with this email.',
+      'Callback': 'Callback error. Check your redirect URIs.',
+      'OAuthAccountNotLinked': 'This email is already associated with another account.',
+      'EmailSignin': 'Failed to send sign-in email.',
+      'CredentialsSignin': 'Sign in failed. Check your credentials.',
+      'SessionRequired': 'You must be signed in to access this page.',
+      'AccessDenied': 'Access denied. Your email is not on the allowlist.',
+      'Configuration': 'Server configuration error. Check environment variables.',
+      'Default': 'An unexpected error occurred during sign in.'
+    };
+    
+    return errorMessages[error] || `Unknown error: ${error}`;
+  };
+
+  const errorMessage = getErrorMessage(error);
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col justify-center items-center p-4">
       <Card className="w-full max-w-md">
@@ -26,19 +50,27 @@ function SignInContent() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {error && (
+          {errorMessage && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>
-                {error === 'AccessDenied' 
-                  ? 'Access denied. Please use your company email address.'
-                  : 'An error occurred during sign in. Please try again.'}
+                <div className="font-medium mb-1">Sign in failed</div>
+                <div className="text-sm">{errorMessage}</div>
+                {error && (
+                  <div className="text-xs mt-2 font-mono bg-red-50 p-2 rounded">
+                    Error code: {error}
+                  </div>
+                )}
               </AlertDescription>
             </Alert>
           )}
           
           <Button
-            onClick={() => signIn('google', { callbackUrl })}
+            onClick={() => {
+              console.log('Sign in button clicked');
+              console.log('Callback URL:', callbackUrl);
+              signIn('google', { callbackUrl });
+            }}
             className="w-full"
             size="lg"
           >
@@ -63,9 +95,21 @@ function SignInContent() {
             Sign in with Google
           </Button>
           
-          <p className="text-sm text-gray-500 text-center">
-            Only company email addresses are allowed
-          </p>
+          <div className="space-y-2 text-sm text-gray-500 text-center">
+            <p>Only company email addresses are allowed</p>
+            {process.env.NODE_ENV === 'development' && (
+              <details className="text-xs text-left">
+                <summary className="cursor-pointer text-center">Debug Info</summary>
+                <pre className="mt-2 bg-gray-100 p-2 rounded overflow-auto">
+{JSON.stringify({
+  error,
+  callbackUrl,
+  currentUrl: typeof window !== 'undefined' ? window.location.href : 'SSR',
+}, null, 2)}
+                </pre>
+              </details>
+            )}
+          </div>
         </CardContent>
       </Card>
     </div>
