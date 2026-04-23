@@ -14,6 +14,7 @@ import dynamic from 'next/dynamic';
 import { useProperties } from '@/hooks/useProperties';
 import { useActiveProperties } from '@/hooks/useActiveProperties';
 import { UserMenu } from './UserMenu';
+import { HOURLY_RATES, WEEKS_PER_MONTH } from '@/lib/constants';
 
 // Dynamically import RouteMap to avoid SSR issues
 const RouteMap = dynamic(() => import('./RouteMap'), {
@@ -74,19 +75,6 @@ const BRANCHES = {
   }
 };
 
-// Constants for calculations
-const HOURLY_RATES = {
-  PHX: {
-    MOBILE: 25,
-    ONSITE: 28.50
-  },
-  LV: {
-    MOBILE: 23,
-    ONSITE: 24.75
-  }
-};
-const WEEKS_PER_MONTH = 4.33;
-
 export interface Property {
   id?: string;
   name: string;
@@ -133,6 +121,7 @@ const PropertyCalculator = () => {
   const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
   const [isFindingClosestBranch, setIsFindingClosestBranch] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
+  const [revenueSummary, setRevenueSummary] = useState<{ monthly: number; annual: number } | null>(null);
   const [proximityData, setProximityData] = useState<{
     nearbyProperties: any[];
     proximityFactor: number;
@@ -148,13 +137,11 @@ const PropertyCalculator = () => {
   const { properties: savedProperties, loading: propertiesLoading, saveProperty: saveToSupabase, deleteProperty: deleteFromSupabase } = useProperties();
   
   // Use Active Properties hook
-  const { 
-    activeProperties, 
-    loading: activePropertiesLoading, 
-    importProgress, 
-    importProperties, 
+  const {
+    importProgress,
+    importProperties,
     calculateProximity,
-    totalCount: totalActiveProperties 
+    totalCount: totalActiveProperties
   } = useActiveProperties();
 
   // Get branches for selected region
@@ -367,7 +354,6 @@ const PropertyCalculator = () => {
         
         // Check for nearby properties - always try if not explicitly skipped
         if (!skipProximity) {
-          console.log('Attempting proximity calculation. Total active properties:', totalActiveProperties);
           try {
             const proximityResult = await calculateProximity(
               geocodeResult.location.lat,
@@ -375,9 +361,7 @@ const PropertyCalculator = () => {
               selectedBranchId,
               3 // 3 mile radius
             );
-            
-            console.log('Proximity result:', proximityResult);
-            
+
             if (proximityResult && proximityResult.nearbyProperties && proximityResult.nearbyProperties.length > 0) {
               const adjustedTime = Math.round(driveTimeHours * proximityResult.proximityFactor * 10) / 10;
               setProximityData({
@@ -386,18 +370,11 @@ const PropertyCalculator = () => {
                 description: proximityResult.description,
                 adjustedDriveTime: adjustedTime
               });
-              console.log('Proximity data set:', { 
-                nearbyCount: proximityResult.nearbyProperties.length,
-                factor: proximityResult.proximityFactor,
-                adjustedTime 
-              });
             } else {
-              // Clear proximity data if no nearby properties
               setProximityData(null);
             }
           } catch (proximityError) {
             console.error('Proximity calculation error:', proximityError);
-            // Don't fail the whole operation if proximity fails
           }
         }
       } else {
@@ -434,12 +411,10 @@ const PropertyCalculator = () => {
       const result = await response.json();
       
       if (result.success) {
-        console.log('Setting suggested branch to:', result.closestBranch.id);
         setSuggestedBranch(result.closestBranch.id);
-        
+
         // Update market/branch if it's a new address being typed (not when loading a property)
         if (isNewAddress) {
-          console.log('Auto-selecting closest branch:', result.closestBranch.name);
           // Set flag to prevent cascading updates
           isUpdatingFromAddress.current = true;
           
@@ -456,15 +431,14 @@ const PropertyCalculator = () => {
           setCalculatedDriveTime(driveTimeHours);
           
           // Also calculate proximity for the closest branch
-          console.log('Calculating proximity for closest branch...');
           try {
             const proximityResult = await calculateProximity(
-              result.propertyLocation.lat,  // Fixed: use propertyLocation.lat
-              result.propertyLocation.lng,  // Fixed: use propertyLocation.lng
+              result.propertyLocation.lat,
+              result.propertyLocation.lng,
               result.closestBranch.id,
               3 // 3 mile radius
             );
-            
+
             if (proximityResult && proximityResult.nearbyProperties && proximityResult.nearbyProperties.length > 0) {
               const adjustedTime = Math.round(driveTimeHours * proximityResult.proximityFactor * 10) / 10;
               setProximityData({
@@ -473,7 +447,6 @@ const PropertyCalculator = () => {
                 description: proximityResult.description,
                 adjustedDriveTime: adjustedTime
               });
-              console.log('Proximity data set from findClosestBranch');
             } else {
               setProximityData(null);
             }
@@ -555,17 +528,17 @@ const PropertyCalculator = () => {
     // 2. A current address
     // 3. Calculated drive time
     // 4. No proximity data yet
-    if (totalActiveProperties > 0 && 
-        currentProperty.address && 
+    if (totalActiveProperties > 0 &&
+        currentProperty.address &&
         currentProperty.branch &&
-        calculatedDriveTime !== null && 
+        calculatedDriveTime !== null &&
         !proximityData &&
         !isCalculatingDistance) {
-      console.log('Active properties loaded, retrying proximity calculation...');
       // Recalculate to get proximity data
       calculateDriveTime(currentProperty.address, currentProperty.branch, false);
     }
-  }, [totalActiveProperties]); // Only depend on totalActiveProperties changing
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalActiveProperties]); // Intentionally only re-run when active-properties count changes
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -1397,27 +1370,26 @@ const PropertyCalculator = () => {
                     variant="outline"
                     size="default"
                     onClick={() => {
-                      // Calculate summary stats
                       const totalMonthly = savedProperties.reduce((sum, property) => {
-                        const monthlyPrice = property.maintenanceData?.hoursInput ? 
+                        const monthlyPrice = property.maintenanceData?.hoursInput ?
                           (() => {
                             const market = property.market || 'PHX';
                             const hourlyRate = HOURLY_RATES[market][
                               property.maintenanceData.hoursInput.isOnsiteCrew ? 'ONSITE' : 'MOBILE'
                             ];
-                            const driveTime = property.maintenanceData.hoursInput.driveTimeHours * 
+                            const driveTime = property.maintenanceData.hoursInput.driveTimeHours *
                               (property.maintenanceData.hoursInput.crewSize || 1);
                             const totalHoursPerVisit = property.maintenanceData.hoursInput.weeklyHours + driveTime;
                             const totalHoursPerMonth = totalHoursPerVisit * WEEKS_PER_MONTH;
                             const costPerMonth = totalHoursPerMonth * hourlyRate;
                             const margin = property.maintenanceData.sliderMargin || 55;
                             return costPerMonth / (1 - (margin / 100));
-                          })() : 
+                          })() :
                           property.maintenanceData?.priceInput?.monthlyPrice || 0;
                         return sum + monthlyPrice;
                       }, 0);
-                      
-                      alert(`Total Monthly Revenue: $${totalMonthly.toLocaleString('en-US', { maximumFractionDigits: 0 })}\nAnnual Revenue: $${(totalMonthly * 12).toLocaleString('en-US', { maximumFractionDigits: 0 })}`);
+
+                      setRevenueSummary({ monthly: totalMonthly, annual: totalMonthly * 12 });
                     }}
                     className="px-6"
                   >
@@ -1426,6 +1398,37 @@ const PropertyCalculator = () => {
                 </div>
               </div>
             )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Revenue Summary Dialog */}
+        <Dialog open={revenueSummary !== null} onOpenChange={(open) => !open && setRevenueSummary(null)}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Revenue Summary</DialogTitle>
+              <DialogDescription>
+                Based on {savedProperties.length} saved {savedProperties.length === 1 ? 'property' : 'properties'}.
+              </DialogDescription>
+            </DialogHeader>
+            {revenueSummary && (
+              <div className="space-y-3 pt-2">
+                <div className="flex justify-between items-center p-3 bg-green-50 rounded-lg border border-green-100">
+                  <span className="text-sm font-medium text-gray-700">Monthly</span>
+                  <span className="text-xl font-bold text-green-700">
+                    ${revenueSummary.monthly.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-blue-50 rounded-lg border border-blue-100">
+                  <span className="text-sm font-medium text-gray-700">Annual</span>
+                  <span className="text-xl font-bold text-blue-700">
+                    ${revenueSummary.annual.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                  </span>
+                </div>
+              </div>
+            )}
+            <div className="flex justify-end mt-4">
+              <Button variant="outline" onClick={() => setRevenueSummary(null)}>Close</Button>
+            </div>
           </DialogContent>
         </Dialog>
 
@@ -1515,4 +1518,3 @@ Camelback Office,567 W Camelback Rd Phoenix AZ,phx-sw
 };
 
 export default PropertyCalculator;
-export type { Property };

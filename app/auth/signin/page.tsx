@@ -66,11 +66,7 @@ function SignInContent() {
           )}
           
           <Button
-            onClick={() => {
-              console.log('Sign in button clicked');
-              console.log('Callback URL:', callbackUrl);
-              signIn('google', { callbackUrl });
-            }}
+            onClick={() => signIn('google', { callbackUrl })}
             className="w-full"
             size="lg"
           >

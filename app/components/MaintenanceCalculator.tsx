@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Info, Target, CheckCircle, AlertCircle, XCircle, TreePine, Navigation, Plus, Minus } from 'lucide-react';
+import { Info, Target, CheckCircle, AlertCircle, XCircle, TreePine, Plus, Minus } from 'lucide-react';
 import {
   Tooltip,
   TooltipContent,
@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/tooltip";
 import { Card } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { HOURLY_RATES, WEEKS_PER_MONTH, type Market } from '@/lib/constants';
 
 interface MaintenanceCalculatorProps {
   selectedMarket: 'PHX' | 'LV';
@@ -18,36 +19,22 @@ interface MaintenanceCalculatorProps {
   onDataChange?: (data: any) => void;
 }
 
-const MaintenanceCalculator: React.FC<MaintenanceCalculatorProps> = ({ 
+const MaintenanceCalculator: React.FC<MaintenanceCalculatorProps> = ({
   selectedMarket: initialMarket = 'PHX',
   landscapeHours = 0,
-  selectedBranch,
   calculatedDriveTime,
   savedData,
   onDataChange
 }) => {
-  // Constants
-  const HOURLY_RATES = {
-    PHX: {
-      MOBILE: 25,
-      ONSITE: 28.50
-    },
-    LV: {
-      MOBILE: 23,
-      ONSITE: 24.75
-    }
-  };
-  const WEEKS_PER_MONTH = 4.33;
-  
   // State management
-  const [selectedMarket, setSelectedMarket] = useState(
-    savedData?.selectedMarket || initialMarket
+  const [selectedMarket, setSelectedMarket] = useState<Market>(
+    (savedData?.selectedMarket as Market) || initialMarket
   );
   const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
   
   // Calculate initial drive time for Price to Hours based on 15% of on-property time
   const calculateInitialPriceDriveTime = () => {
-    const hourlyRate = HOURLY_RATES['PHX']['MOBILE'];
+    const hourlyRate = HOURLY_RATES[selectedMarket].MOBILE;
     const costPerMonth = 2000 * (1 - 0.55);
     const totalHoursPerMonth = costPerMonth / hourlyRate;
     const totalHoursPerWeek = totalHoursPerMonth / WEEKS_PER_MONTH;
@@ -59,30 +46,37 @@ const MaintenanceCalculator: React.FC<MaintenanceCalculatorProps> = ({
   // This allows users to manually adjust drive time based on local knowledge
   // (e.g., multiple properties nearby, traffic patterns, etc.)
 
-  const [hoursInput, setHoursInput] = useState(() => {
+  type HoursInput = {
+    weeklyHours: number;
+    driveTimeHours: number;
+    isOnsiteCrew: boolean;
+    crewSize: number;
+  };
+  type PriceInput = {
+    monthlyPrice: number;
+    driveTimeHours: number;
+    isOnsiteCrew: boolean;
+  };
+
+  const [hoursInput, setHoursInput] = useState<HoursInput>(() => {
     if (savedData?.hoursInput) {
-      // Use saved drive time if it exists, ensure crew size defaults to 1
-      console.log('Loading saved hoursInput:', savedData.hoursInput);
       return {
-        ...savedData.hoursInput,
+        ...(savedData.hoursInput as HoursInput),
         crewSize: savedData.hoursInput.crewSize || 1
       };
     }
-    // For new properties, use calculated drive time if available
     return {
       weeklyHours: landscapeHours || 9,
-      driveTimeHours: calculatedDriveTime !== null && calculatedDriveTime !== undefined ? calculatedDriveTime : (landscapeHours || 9) * 0.15,
+      driveTimeHours: calculatedDriveTime != null ? calculatedDriveTime : (landscapeHours || 9) * 0.15,
       isOnsiteCrew: false,
       crewSize: 1
     };
   });
 
-  const [priceInput, setPriceInput] = useState(() => {
+  const [priceInput, setPriceInput] = useState<PriceInput>(() => {
     if (savedData?.priceInput) {
-      // Use saved price input data including drive time
-      return savedData.priceInput;
+      return savedData.priceInput as PriceInput;
     }
-    // For new properties, calculate default drive time
     return {
       monthlyPrice: 2000,
       driveTimeHours: calculateInitialPriceDriveTime(),
@@ -100,15 +94,13 @@ const MaintenanceCalculator: React.FC<MaintenanceCalculatorProps> = ({
   // Notify parent when data changes
   useEffect(() => {
     if (onDataChange) {
-      const dataToSave = {
+      onDataChange({
         selectedMarket,
         hoursInput,
         priceInput,
         sliderMargin,
         priceSliderMargin
-      };
-      console.log('MaintenanceCalculator sending data:', dataToSave);
-      onDataChange(dataToSave);
+      });
     }
   }, [selectedMarket, hoursInput, priceInput, sliderMargin, priceSliderMargin, onDataChange]);
 
@@ -126,24 +118,15 @@ const MaintenanceCalculator: React.FC<MaintenanceCalculatorProps> = ({
 
   // Only update drive time when it's a NEW property (no saved data) and calculated drive time is available
   useEffect(() => {
-    // If we have saved data, never auto-update the drive time
-    if (savedData) {
-      console.log('Have saved data, not updating drive time');
-      return;
-    }
-    
-    // Skip if it's an onsite crew or no calculated drive time
-    if (hoursInput.isOnsiteCrew || calculatedDriveTime === null || calculatedDriveTime === undefined) {
-      return;
-    }
-    
-    // Only update if the current drive time looks like the default 15% calculation
+    // Never overwrite saved/manually-adjusted drive time
+    if (savedData) return;
+    if (hoursInput.isOnsiteCrew || calculatedDriveTime == null) return;
+
+    // Only replace the drive time if it still looks like the untouched default (15% of weekly hours)
     const expectedDefault = hoursInput.weeklyHours * 0.15;
-    const currentValue = hoursInput.driveTimeHours;
-    const looksLikeDefault = Math.abs(currentValue - expectedDefault) < 0.01;
-    
+    const looksLikeDefault = Math.abs(hoursInput.driveTimeHours - expectedDefault) < 0.01;
+
     if (looksLikeDefault) {
-      console.log('Updating drive time from calculated:', calculatedDriveTime);
       setHoursInput(prev => ({
         ...prev,
         driveTimeHours: calculatedDriveTime
@@ -162,7 +145,7 @@ const MaintenanceCalculator: React.FC<MaintenanceCalculatorProps> = ({
   const ToggleSwitch = ({ isChecked, onChange, leftLabel, rightLabel }: any) => (
     <div className="flex items-center justify-center gap-3 py-2">
       <span className={`text-sm ${!isChecked ? 'font-medium' : ''}`}>{leftLabel}</span>
-      <div className="relative inline-block w-12 h-6 cursor-pointer" onClick={(e) => onChange({ target: { checked: !isChecked } })}>
+      <div className="relative inline-block w-12 h-6 cursor-pointer" onClick={() => onChange({ target: { checked: !isChecked } })}>
         <div className={`block w-12 h-6 rounded-full transition-colors duration-200 ease-in-out ${isChecked ? 'bg-blue-900' : 'bg-gray-300'}`}>
           <div 
             className={`absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform duration-200 ease-in-out transform ${

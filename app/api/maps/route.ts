@@ -5,11 +5,6 @@ const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 export async function POST(request: NextRequest) {
   try {
     const { action, data } = await request.json();
-    
-    // Get the request headers to determine the host
-    const host = request.headers.get('host');
-    const protocol = request.headers.get('x-forwarded-proto') || 'http';
-    const baseIconUrl = `${protocol}://${host}`;
 
     switch (action) {
       case 'geocode':
@@ -22,7 +17,7 @@ export async function POST(request: NextRequest) {
         return await findClosestBranch(data.address, data.branches);
       
       case 'staticmap':
-        return await getStaticMapUrl({ ...data, baseIconUrl });
+        return getProxiedMapUrl(data);
       
       default:
         return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
@@ -109,10 +104,11 @@ async function findClosestBranch(address: string, branches: any[]) {
   }
   
   // Find the closest branch
-  let closestBranch = null;
+  type Duration = { value: number; text: string };
+  let closestBranch: unknown = null;
   let shortestDistance = Infinity;
-  let closestDuration = null;
-  
+  let closestDuration: Duration | null = null;
+
   distanceData.rows[0].elements.forEach((element: any, index: number) => {
     if (element.status === 'OK' && element.distance.value < shortestDistance) {
       shortestDistance = element.distance.value;
@@ -120,149 +116,45 @@ async function findClosestBranch(address: string, branches: any[]) {
       closestDuration = element.duration;
     }
   });
-  
-  if (!closestBranch) {
+
+  if (!closestBranch || !closestDuration) {
     return NextResponse.json({
       success: false,
       error: 'Could not determine closest branch'
     });
   }
-  
+
   return NextResponse.json({
     success: true,
     closestBranch,
     duration: closestDuration,
-    durationHours: closestDuration.value / 3600,
+    durationHours: (closestDuration as Duration).value / 3600,
     propertyLocation,
     formatted_address: geocodeData.results[0].formatted_address
   });
 }
 
-async function getStaticMapUrl(data: { 
-  propertyLat: number; 
-  propertyLng: number; 
-  branchLat: number; 
+// Returns a URL pointing to our own /api/maps/static-image proxy, so the
+// Google API key is never exposed to the browser.
+function getProxiedMapUrl(data: {
+  propertyLat: number;
+  propertyLng: number;
+  branchLat: number;
   branchLng: number;
   branchIcon?: string;
   zoom?: number;
-  baseIconUrl: string;
 }) {
-  try {
-    // First, get the actual driving route using Directions API
-    const directionsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${data.propertyLat},${data.propertyLng}&destination=${data.branchLat},${data.branchLng}&mode=driving&key=${GOOGLE_MAPS_API_KEY}`;
-    
-    const directionsResponse = await fetch(directionsUrl);
-    const directionsData = await directionsResponse.json();
-    
-    let routePath = '';
-    let bounds = null;
-    
-    if (directionsData.status === 'OK' && directionsData.routes.length > 0) {
-      // Get the encoded polyline from the route
-      const route = directionsData.routes[0];
-      routePath = route.overview_polyline.points;
-      bounds = route.bounds;
-    }
-    
-    // Calculate center and zoom from bounds if available
-    let centerLat = (data.propertyLat + data.branchLat) / 2;
-    let centerLng = (data.propertyLng + data.branchLng) / 2;
-    let zoom = 11; // Default zoom
-    
-    if (bounds) {
-      centerLat = (bounds.northeast.lat + bounds.southwest.lat) / 2;
-      centerLng = (bounds.northeast.lng + bounds.southwest.lng) / 2;
-      
-      // Calculate zoom based on bounds
-      const latDiff = bounds.northeast.lat - bounds.southwest.lat;
-      const lngDiff = bounds.northeast.lng - bounds.southwest.lng;
-      const maxDiff = Math.max(latDiff, lngDiff);
-      
-      if (maxDiff > 0.5) zoom = 9;
-      else if (maxDiff > 0.2) zoom = 10;
-      else if (maxDiff > 0.1) zoom = 11;
-      else if (maxDiff > 0.05) zoom = 12;
-      else zoom = 13;
-    }
-    
-    // Override with custom zoom if provided
-    if (data.zoom) {
-      zoom = data.zoom;
-    }
-    
-    const baseUrl = 'https://maps.googleapis.com/maps/api/staticmap';
-    const params = new URLSearchParams({
-      size: '800x200',
-      scale: '1',
-      maptype: 'roadmap',
-      key: GOOGLE_MAPS_API_KEY,
-    });
-    
-    // Add markers
-    params.append('markers', `color:red|label:P|size:large|${data.propertyLat},${data.propertyLng}`);
-    
-    // Add branch marker with custom icon if available
-    if (data.branchIcon) {
-      // Check if branchIcon is already a full URL (contains http)
-      const iconUrl = data.branchIcon.includes('http') 
-        ? data.branchIcon 
-        : `${data.baseIconUrl}/icons/${data.branchIcon}`;
-      
-      // Try using the icon without query parameters for Google Static Maps
-      const cleanIconUrl = iconUrl.split('?')[0];
-      
-      params.append('markers', `icon:${encodeURIComponent(cleanIconUrl)}|${data.branchLat},${data.branchLng}`);
-    } else {
-      // Fallback to default blue marker with B label
-      params.append('markers', `color:blue|label:B|size:large|${data.branchLat},${data.branchLng}`);
-    }
-    
-    // Add the actual route path if we got it, otherwise fall back to straight line
-    if (routePath) {
-      // Use the encoded polyline for the actual driving route
-      params.append('path', `color:0x0000ff|weight:5|enc:${routePath}`);
-    } else {
-      // Fallback to straight line if directions failed
-      params.append('path', `color:0x0000ff|weight:5|${data.propertyLat},${data.propertyLng}|${data.branchLat},${data.branchLng}`);
-    }
-    
-    // Don't set center/zoom if we have a route - let Google auto-fit
-    if (!routePath) {
-      params.append('center', `${centerLat},${centerLng}`);
-      params.append('zoom', zoom.toString());
-    }
-    
-    return NextResponse.json({
-      success: true,
-      mapUrl: `${baseUrl}?${params.toString()}`,
-      zoom: zoom
-    });
-  } catch (error) {
-    console.error('Error generating static map URL:', error);
-    
-    // Fallback to simple straight line map if directions fail
-    const centerLat = (data.propertyLat + data.branchLat) / 2;
-    const centerLng = (data.propertyLng + data.branchLng) / 2;
-    const zoom = data.zoom || 11;
-    
-    const baseUrl = 'https://maps.googleapis.com/maps/api/staticmap';
-    const params = new URLSearchParams({
-      size: '800x200',
-      scale: '1',
-      maptype: 'roadmap',
-      center: `${centerLat},${centerLng}`,
-      zoom: zoom.toString(),
-      key: GOOGLE_MAPS_API_KEY,
-      markers: `color:red|label:P|size:large|${data.propertyLat},${data.propertyLng}`,
-    });
-    
-    params.append('markers', `color:blue|label:B|size:large|${data.branchLat},${data.branchLng}`);
-    params.append('path', `color:0x0000ff|weight:5|${data.propertyLat},${data.propertyLng}|${data.branchLat},${data.branchLng}`);
-    
-    return NextResponse.json({
-      success: true,
-      mapUrl: `${baseUrl}?${params.toString()}`,
-      zoom: zoom
-    });
-  }
+  const params = new URLSearchParams({
+    plat: String(data.propertyLat),
+    plng: String(data.propertyLng),
+    blat: String(data.branchLat),
+    blng: String(data.branchLng),
+  });
+  if (data.branchIcon) params.set('bicon', data.branchIcon);
+  if (data.zoom) params.set('zoom', String(data.zoom));
+
+  return NextResponse.json({
+    success: true,
+    mapUrl: `/api/maps/static-image?${params.toString()}`,
+  });
 }

@@ -97,8 +97,8 @@ export function useActiveProperties() {
     radiusMiles: number = 1
   ): Promise<ProximityResult | null> => {
     try {
-      // Validate inputs before sending
-      if (!lat || !lng || !branch) {
+      // Validate inputs before sending (allow lat/lng of 0)
+      if (lat == null || lng == null || !branch) {
         console.error('Missing required parameters for proximity calculation:', { lat, lng, branch });
         return null;
       }

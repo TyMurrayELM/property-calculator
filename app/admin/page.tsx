@@ -7,14 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Trash2, UserPlus, Shield, Loader2, AlertCircle, Clock, LogIn, Calendar, Users, ArrowLeft } from 'lucide-react';
-import { createClient } from '@supabase/supabase-js';
+import { Trash2, UserPlus, Shield, Loader2, AlertCircle, Clock, LogIn, Users, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
 
 interface AllowedUser {
   id: string;
@@ -48,16 +42,13 @@ export default function AdminPage() {
 
   const fetchUsers = async () => {
     try {
-      const { data, error } = await supabase
-        .from('allowed_users')
-        .select('*')
-        .order('last_login', { ascending: false, nullsFirst: false });
-      
-      if (error) throw error;
-      setUsers(data || []);
-    } catch (error) {
-      console.error('Error fetching users:', error);
-      setError('Failed to load users');
+      const response = await fetch('/api/admin/users');
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to load users');
+      setUsers(data.users || []);
+    } catch (err) {
+      console.error('Error fetching users:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load users');
     } finally {
       setLoading(false);
     }
@@ -66,65 +57,56 @@ export default function AdminPage() {
   const addUser = async () => {
     setError('');
     setSuccess('');
-    
+
     if (!newUser.email) {
       setError('Email is required');
       return;
     }
 
     try {
-      const { error } = await supabase
-        .from('allowed_users')
-        .insert({
-          email: newUser.email.toLowerCase(),
-          name: newUser.name || newUser.email.split('@')[0],
-          role: newUser.role,
-          added_by: session?.user?.email
-        });
-      
-      if (error) throw error;
-      
+      const response = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newUser),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to add user');
+
       setSuccess(`Added ${newUser.email} to allowlist`);
       setNewUser({ email: '', name: '', role: 'user' });
       fetchUsers();
-    } catch (error: any) {
-      if (error.code === '23505') {
-        setError('This email is already in the allowlist');
-      } else {
-        setError('Failed to add user');
-      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add user');
     }
   };
 
   const toggleUserStatus = async (user: AllowedUser) => {
     try {
-      const { error } = await supabase
-        .from('allowed_users')
-        .update({ is_active: !user.is_active })
-        .eq('id', user.id);
-      
-      if (error) throw error;
+      const response = await fetch('/api/admin/users', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: user.id, is_active: !user.is_active }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to update user status');
       fetchUsers();
-    } catch (error) {
-      console.error('Error updating user:', error);
-      setError('Failed to update user status');
+    } catch (err) {
+      console.error('Error updating user:', err);
+      setError(err instanceof Error ? err.message : 'Failed to update user status');
     }
   };
 
   const deleteUser = async (userId: string) => {
     if (!confirm('Are you sure you want to remove this user from the allowlist?')) return;
-    
+
     try {
-      const { error } = await supabase
-        .from('allowed_users')
-        .delete()
-        .eq('id', userId);
-      
-      if (error) throw error;
+      const response = await fetch(`/api/admin/users?id=${userId}`, { method: 'DELETE' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to delete user');
       fetchUsers();
-    } catch (error) {
-      console.error('Error deleting user:', error);
-      setError('Failed to delete user');
+    } catch (err) {
+      console.error('Error deleting user:', err);
+      setError(err instanceof Error ? err.message : 'Failed to delete user');
     }
   };
 
@@ -364,9 +346,11 @@ export default function AdminPage() {
                           <td className="p-2">
                             <button
                               onClick={() => toggleUserStatus(user)}
-                              className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                user.is_active 
-                                  ? 'bg-green-100 text-green-700' 
+                              disabled={user.email === session?.user?.email}
+                              title={user.email === session?.user?.email ? "Can't disable yourself" : ''}
+                              className={`px-2 py-1 rounded-full text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed ${
+                                user.is_active
+                                  ? 'bg-green-100 text-green-700'
                                   : 'bg-red-100 text-red-700'
                               }`}
                             >

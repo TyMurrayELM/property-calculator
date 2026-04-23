@@ -23,74 +23,60 @@ const RouteMap: React.FC<RouteMapProps> = ({ propertyAddress, branch, calculated
   const [zoomLevel, setZoomLevel] = useState<number | null>(null);
   const [propertyCoords, setPropertyCoords] = useState<{ lat: number; lng: number } | null>(null);
 
+  const loadMapImage = async (coords: { lat: number; lng: number }, customZoom?: number) => {
+    const res = await fetch('/api/maps', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'staticmap',
+        data: {
+          propertyLat: coords.lat,
+          propertyLng: coords.lng,
+          branchLat: branch.lat,
+          branchLng: branch.lng,
+          branchIcon: branch.icon,
+          zoom: customZoom,
+        },
+      }),
+    });
+    const meta = await res.json();
+    if (!meta.success || !meta.mapUrl) return;
+
+    // Fetch the image as a blob so we can read the X-Map-Zoom header
+    const imgRes = await fetch(meta.mapUrl);
+    if (!imgRes.ok) return;
+    const zoomHeader = imgRes.headers.get('X-Map-Zoom');
+    const blob = await imgRes.blob();
+    const objectUrl = URL.createObjectURL(blob);
+
+    setMapUrl(prev => {
+      if (prev) URL.revokeObjectURL(prev);
+      return objectUrl;
+    });
+    if (zoomHeader) {
+      const parsed = parseInt(zoomHeader, 10);
+      if (!Number.isNaN(parsed)) setZoomLevel(parsed);
+    }
+  };
+
   const generateMapUrl = async (customZoom?: number) => {
     setIsLoading(true);
-    
+
     try {
-      // First geocode the property address if we haven't already
-      if (!propertyCoords) {
+      let coords = propertyCoords;
+      if (!coords) {
         const response = await fetch('/api/maps', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'geocode',
-            data: { address: propertyAddress }
-          })
+          body: JSON.stringify({ action: 'geocode', data: { address: propertyAddress } }),
         });
-        
         const geocodeResult = await response.json();
-        
         if (!geocodeResult.success) return;
-        
-        setPropertyCoords(geocodeResult.location);
-        
-        // Get map with auto-calculated zoom
-        const mapResponse = await fetch('/api/maps', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'staticmap',
-            data: {
-              propertyLat: geocodeResult.location.lat,
-              propertyLng: geocodeResult.location.lng,
-              branchLat: branch.lat,
-              branchLng: branch.lng,
-              branchIcon: branch.icon,
-              zoom: customZoom
-            }
-          })
-        });
-        
-        const mapResult = await mapResponse.json();
-        if (mapResult.success) {
-          setMapUrl(mapResult.mapUrl);
-          if (!zoomLevel && mapResult.zoom) {
-            setZoomLevel(mapResult.zoom);
-          }
-        }
-      } else {
-        // We already have coordinates, just update zoom
-        const mapResponse = await fetch('/api/maps', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'staticmap',
-            data: {
-              propertyLat: propertyCoords.lat,
-              propertyLng: propertyCoords.lng,
-              branchLat: branch.lat,
-              branchLng: branch.lng,
-              branchIcon: branch.icon,
-              zoom: customZoom || zoomLevel
-            }
-          })
-        });
-        
-        const mapResult = await mapResponse.json();
-        if (mapResult.success) {
-          setMapUrl(mapResult.mapUrl);
-        }
+        coords = geocodeResult.location;
+        setPropertyCoords(coords);
       }
+
+      await loadMapImage(coords!, customZoom ?? zoomLevel ?? undefined);
     } catch (error) {
       console.error('Error generating map:', error);
     } finally {
@@ -101,6 +87,14 @@ const RouteMap: React.FC<RouteMapProps> = ({ propertyAddress, branch, calculated
   useEffect(() => {
     if (!propertyAddress || !branch) return;
     generateMapUrl();
+    // Clean up the last object URL on unmount
+    return () => {
+      setMapUrl(prev => {
+        if (prev) URL.revokeObjectURL(prev);
+        return '';
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [propertyAddress, branch]);
 
   const handleZoom = (direction: 'in' | 'out') => {

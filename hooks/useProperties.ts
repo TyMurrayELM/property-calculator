@@ -1,6 +1,6 @@
 // hooks/useProperties.ts
 import { useState, useEffect } from 'react';
-import { Property } from '@/components/PropertyCalculator';
+import { Property } from '@/app/components/PropertyCalculator';
 
 export const useProperties = () => {
   const [properties, setProperties] = useState<Property[]>([]);

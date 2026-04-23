@@ -7,20 +7,32 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-// GET - Fetch all properties
+// GET - Fetch all properties (paginated to bypass Supabase's 1000-row default cap)
 export async function GET() {
   try {
-    const { data: properties, error } = await supabase
-      .from('properties')
-      .select('*')
-      .order('updated_at', { ascending: false });
+    const PAGE_SIZE = 1000;
+    const all: any[] = [];
+    let from = 0;
 
-    if (error) {
-      console.error('Error fetching properties:', error);
-      return NextResponse.json({ error: 'Failed to fetch properties' }, { status: 500 });
+    while (true) {
+      const { data, error } = await supabase
+        .from('properties')
+        .select('*')
+        .order('updated_at', { ascending: false })
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (error) {
+        console.error('Error fetching properties:', error);
+        return NextResponse.json({ error: 'Failed to fetch properties' }, { status: 500 });
+      }
+
+      if (!data || data.length === 0) break;
+      all.push(...data);
+      if (data.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
     }
 
-    return NextResponse.json({ properties: properties || [] });
+    return NextResponse.json({ properties: all });
   } catch (error) {
     console.error('Unexpected error:', error);
     return NextResponse.json({ error: 'Server error' }, { status: 500 });

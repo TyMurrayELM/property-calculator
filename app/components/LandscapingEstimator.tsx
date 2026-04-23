@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -27,9 +27,26 @@ const LandscapingEstimator: React.FC<LandscapingEstimatorProps> = ({
     resort: 1.4
   };
 
-  const [formData, setFormData] = useState(() => {
+  type LandscapeFormData = {
+    propertyType: string;
+    onSite: boolean;
+    mgtOnSite: boolean;
+    complexityScore: number;
+    plantDensity: number;
+    graniteSF: string;
+    turfSF: string;
+    flowerSF: string;
+    additionalItems: {
+      palms: boolean;
+      preEmergent: boolean;
+      flowers: boolean;
+      turfService: boolean;
+    };
+  };
+
+  const [formData, setFormData] = useState<LandscapeFormData>(() => {
     if (savedData) {
-      return savedData;
+      return savedData as LandscapeFormData;
     }
     return {
       propertyType: initialPropertyType,
@@ -157,16 +174,6 @@ const LandscapingEstimator: React.FC<LandscapingEstimatorProps> = ({
     });
   };
 
-  const handleAdditionalItemChange = (item: string) => {
-    setFormData(prev => ({
-      ...prev,
-      additionalItems: {
-        ...prev.additionalItems,
-        [item]: !prev.additionalItems[item as keyof typeof prev.additionalItems]
-      }
-    }));
-  };
-
   const calculateCategoryHours = (sqft: string, divisor?: number) => {
     const numericValue = getNumericValue(sqft || '0');
     if (divisor === undefined) {
@@ -181,28 +188,15 @@ const LandscapingEstimator: React.FC<LandscapingEstimatorProps> = ({
     const turfHours = calculateCategoryHours(formData.turfSF, 7500);
     const flowerHours = calculateCategoryHours(formData.flowerSF, 20000);
     
-    let baseHours = graniteHours + turfHours + flowerHours;
+    const baseHours = graniteHours + turfHours + flowerHours;
     let total = baseHours * formData.complexityScore;
-    
-    Object.entries(formData.additionalItems).forEach(([item, checked]) => {
-      if (checked) {
-        total += 1;
-      }
+
+    Object.values(formData.additionalItems).forEach((checked) => {
+      if (checked) total += 1;
     });
     
     // Round to nearest 0.1
     return (Math.round(total * 10) / 10).toFixed(1);
-  };
-
-  const getItemDisplayName = (item: string) => {
-    switch(item) {
-      case 'preEmergent':
-        return 'Pre-Emergent';
-      case 'turfService':
-        return 'Turf Service';
-      default:
-        return item.charAt(0).toUpperCase() + item.slice(1);
-    }
   };
 
   return (

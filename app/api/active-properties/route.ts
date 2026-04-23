@@ -103,19 +103,31 @@ export async function GET(request: NextRequest) {
       });
     }
     
-    // Fetch all active properties
-    const { data: properties, error } = await supabase
-      .from('active_properties')
-      .select('*')
-      .eq('is_active', true)
-      .order('name');
-    
-    if (error) {
-      console.error('Error fetching active properties:', error);
-      return NextResponse.json({ error: 'Failed to fetch active properties' }, { status: 500 });
+    // Fetch all active properties (paginated to bypass Supabase's 1000-row default cap)
+    const PAGE_SIZE = 1000;
+    const all: any[] = [];
+    let from = 0;
+
+    while (true) {
+      const { data, error } = await supabase
+        .from('active_properties')
+        .select('*')
+        .eq('is_active', true)
+        .order('name')
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (error) {
+        console.error('Error fetching active properties:', error);
+        return NextResponse.json({ error: 'Failed to fetch active properties' }, { status: 500 });
+      }
+
+      if (!data || data.length === 0) break;
+      all.push(...data);
+      if (data.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
     }
-    
-    return NextResponse.json({ properties });
+
+    return NextResponse.json({ properties: all });
   } catch (error) {
     console.error('API error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -260,54 +272,29 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
     
-    // Always clear existing properties before importing new ones
-    console.log('Clearing existing properties...');
-    const { error: deleteError } = await supabase
-      .from('active_properties')
-      .delete()
-      .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all
-    
-    if (deleteError) {
-      console.error('Error clearing existing properties:', deleteError);
-      if (deleteError.code === '42P01') {
-        return NextResponse.json({ 
-          error: 'Table "active_properties" does not exist. Please create it in Supabase first.',
-          details: 'Run the SQL script provided in the documentation to create the table.'
-        }, { status: 500 });
-      }
-      return NextResponse.json({ 
-        error: 'Failed to clear existing properties',
-        details: deleteError.message 
-      }, { status: 500 });
-    }
-    console.log('Existing properties cleared.');
-    
-    // Process properties
-    const processedProperties = [];
-    const failedProperties = [];
-    
-    console.log('Starting to process properties...');
-    
-    // Check if we have Google Maps API key
+    // Require API key up-front so we never delete existing data when geocoding can't run
     if (!GOOGLE_MAPS_API_KEY) {
-      return NextResponse.json({ 
+      return NextResponse.json({
         error: 'Google Maps API key is not configured',
         details: 'Set GOOGLE_MAPS_API_KEY environment variable in your .env file',
         solution: 'Add GOOGLE_MAPS_API_KEY=your_api_key to your .env.local file'
       }, { status: 500 });
     }
-    
-    // Batch geocode all addresses
+
+    // Geocode first — if everything fails, we must not touch existing data
     const addresses = validRows.map(row => row.address || row.property_address);
     const geocodeResults = await batchGeocode(addresses);
-    
+
+    const processedProperties = [];
+    const failedProperties = [];
+
     for (let i = 0; i < validRows.length; i++) {
       const row = validRows[i];
       const geocoded = geocodeResults[i];
-      
+
       const propertyName = row.name || row.property_name || row.job_name || 'Unnamed Property';
       const propertyAddress = row.address || row.property_address || '';
-      
+
       if (!geocoded) {
         failedProperties.push({
           name: propertyName,
@@ -316,11 +303,10 @@ export async function POST(request: NextRequest) {
         });
         continue;
       }
-      
-      // Add successfully geocoded property
+
       const branchRaw = row.branch || row.service_branch || '';
       const normalizedBranch = normalizeBranch(branchRaw);
-      
+
       processedProperties.push({
         name: propertyName,
         address: propertyAddress,
@@ -331,42 +317,67 @@ export async function POST(request: NextRequest) {
         uploaded_at: new Date().toISOString()
       });
     }
-    
-    // Insert processed properties in batches
-    if (processedProperties.length > 0) {
-      console.log(`Inserting ${processedProperties.length} properties into database...`);
-      
-      // Insert in batches of 100 to avoid potential issues
-      const batchSize = 100;
-      let insertedCount = 0;
-      
-      for (let i = 0; i < processedProperties.length; i += batchSize) {
-        const batch = processedProperties.slice(i, i + batchSize);
-        const { data, error: insertError } = await supabase
-          .from('active_properties')
-          .insert(batch)
-          .select();
-        
-        if (insertError) {
-          console.error(`Error inserting batch ${i / batchSize + 1}:`, insertError);
-          console.error('Failed batch sample:', batch.slice(0, 3));
-          
-          if (insertError.code === '23502') {
-            return NextResponse.json({ 
-              error: 'Some properties have invalid data. Please ensure all properties have addresses and valid branch IDs.',
-              details: `Failed at batch ${i / batchSize + 1} of ${Math.ceil(processedProperties.length / batchSize)}`
-            }, { status: 500 });
-          }
-          
-          return NextResponse.json({ 
-            error: `Failed to save properties: ${insertError.message}`,
+
+    // Abort BEFORE deleting anything if geocoding produced zero usable rows
+    if (processedProperties.length === 0) {
+      return NextResponse.json({
+        error: 'Geocoding failed for all rows — existing data was not modified',
+        failed: failedProperties.length,
+        failedProperties: failedProperties.slice(0, 10)
+      }, { status: 500 });
+    }
+
+    // Now it's safe to wipe the old set and insert the new set
+    console.log('Clearing existing properties...');
+    const { error: deleteError } = await supabase
+      .from('active_properties')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all
+
+    if (deleteError) {
+      console.error('Error clearing existing properties:', deleteError);
+      if (deleteError.code === '42P01') {
+        return NextResponse.json({
+          error: 'Table "active_properties" does not exist. Please create it in Supabase first.',
+          details: 'Run the SQL script provided in the documentation to create the table.'
+        }, { status: 500 });
+      }
+      return NextResponse.json({
+        error: 'Failed to clear existing properties',
+        details: deleteError.message
+      }, { status: 500 });
+    }
+
+    // Insert processed properties in batches of 100
+    console.log(`Inserting ${processedProperties.length} properties into database...`);
+    const batchSize = 100;
+    let insertedCount = 0;
+
+    for (let i = 0; i < processedProperties.length; i += batchSize) {
+      const batch = processedProperties.slice(i, i + batchSize);
+      const { error: insertError } = await supabase
+        .from('active_properties')
+        .insert(batch);
+
+      if (insertError) {
+        console.error(`Error inserting batch ${i / batchSize + 1}:`, insertError);
+        console.error('Failed batch sample:', batch.slice(0, 3));
+
+        if (insertError.code === '23502') {
+          return NextResponse.json({
+            error: 'Some properties have invalid data. Please ensure all properties have addresses and valid branch IDs.',
             details: `Failed at batch ${i / batchSize + 1} of ${Math.ceil(processedProperties.length / batchSize)}`
           }, { status: 500 });
         }
-        
-        insertedCount += batch.length;
-        console.log(`Inserted batch ${i / batchSize + 1}: ${insertedCount}/${processedProperties.length} properties`);
+
+        return NextResponse.json({
+          error: `Failed to save properties: ${insertError.message}`,
+          details: `Failed at batch ${i / batchSize + 1} of ${Math.ceil(processedProperties.length / batchSize)}`
+        }, { status: 500 });
       }
+
+      insertedCount += batch.length;
+      console.log(`Inserted batch ${i / batchSize + 1}: ${insertedCount}/${processedProperties.length} properties`);
     }
     
     // Collect unique invalid branches for reporting
@@ -417,11 +428,11 @@ export async function PUT(request: NextRequest) {
     const body = await request.json();
     const { lat, lng, branch, radiusMiles = 1 } = body;
     
-    // Validate all required parameters
-    if (!lat || !lng || !branch) {
+    // Validate all required parameters (allow lat/lng of 0)
+    if (lat == null || lng == null || !branch) {
       console.error('Missing parameters:', { lat, lng, branch });
-      return NextResponse.json({ 
-        error: 'Missing required parameters: lat, lng, and branch are all required' 
+      return NextResponse.json({
+        error: 'Missing required parameters: lat, lng, and branch are all required'
       }, { status: 400 });
     }
     
@@ -430,19 +441,31 @@ export async function PUT(request: NextRequest) {
     
     console.log('Proximity calculation request:', { lat, lng, branch: branchStr, radiusMiles });
     
-    // Fetch all active properties for the same branch
-    const { data: properties, error } = await supabase
-      .from('active_properties')
-      .select('*')
-      .eq('is_active', true)
-      .eq('branch', branchStr);
-    
-    if (error) {
-      console.error('Error fetching properties:', error);
-      return NextResponse.json({ error: 'Failed to fetch properties' }, { status: 500 });
+    // Fetch all active properties for the same branch (paginated)
+    const PAGE_SIZE = 1000;
+    const properties: any[] = [];
+    let from = 0;
+
+    while (true) {
+      const { data, error } = await supabase
+        .from('active_properties')
+        .select('*')
+        .eq('is_active', true)
+        .eq('branch', branchStr)
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (error) {
+        console.error('Error fetching properties:', error);
+        return NextResponse.json({ error: 'Failed to fetch properties' }, { status: 500 });
+      }
+
+      if (!data || data.length === 0) break;
+      properties.push(...data);
+      if (data.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
     }
-    
-    console.log(`Found ${properties?.length || 0} properties for branch ${branchStr}`);
+
+    console.log(`Found ${properties.length} properties for branch ${branchStr}`);
     
     // Calculate distances and filter by radius
     const nearbyProperties = properties?.map(property => {

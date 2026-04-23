@@ -10,7 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { User, LogOut, ChevronDown, Shield } from 'lucide-react';
+import { LogOut, ChevronDown, Shield } from 'lucide-react';
 
 export function UserMenu() {
   const { data: session, status } = useSession();
@@ -88,11 +88,7 @@ export function UserMenu() {
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem className="cursor-pointer">
-          <User className="mr-2 h-4 w-4" />
-          <span>Profile</span>
-        </DropdownMenuItem>
-        {(session.user as any).role === 'admin' && (
+        {session.user.role === 'admin' && (
           <>
             <DropdownMenuItem 
               className="cursor-pointer"
