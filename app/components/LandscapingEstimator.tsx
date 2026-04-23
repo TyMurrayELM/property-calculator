@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -77,19 +77,24 @@ const LandscapingEstimator: React.FC<LandscapingEstimatorProps> = ({
     }));
   }, [initialPropertyType]);
 
+  // Keep the latest callbacks in refs so the effects below don't loop if the
+  // parent ever passes inline callbacks (identity changes every render).
+  const onDataChangeRef = useRef(onDataChange);
+  const onHoursUpdateRef = useRef(onHoursUpdate);
+  useEffect(() => {
+    onDataChangeRef.current = onDataChange;
+    onHoursUpdateRef.current = onHoursUpdate;
+  }, [onDataChange, onHoursUpdate]);
+
   // Notify parent when form data changes
   useEffect(() => {
-    if (onDataChange) {
-      onDataChange(formData);
-    }
-  }, [formData, onDataChange]);
+    onDataChangeRef.current?.(formData);
+  }, [formData]);
 
   // Update parent when hours change
   useEffect(() => {
-    if (onHoursUpdate) {
-      const hours = parseFloat(calculateTotalHours());
-      onHoursUpdate(hours);
-    }
+    const hours = parseFloat(calculateTotalHours());
+    onHoursUpdateRef.current?.(hours);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     formData.graniteSF,

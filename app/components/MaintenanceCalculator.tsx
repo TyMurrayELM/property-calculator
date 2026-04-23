@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Info, Target, CheckCircle, AlertCircle, XCircle, TreePine, Plus, Minus } from 'lucide-react';
 import {
   Tooltip,
@@ -91,18 +91,23 @@ const MaintenanceCalculator: React.FC<MaintenanceCalculatorProps> = ({
     savedData?.priceSliderMargin || 55
   );
 
+  // Keep the latest onDataChange in a ref so the effect below doesn't loop if
+  // the parent ever passes an inline callback (identity changes every render).
+  const onDataChangeRef = useRef(onDataChange);
+  useEffect(() => {
+    onDataChangeRef.current = onDataChange;
+  }, [onDataChange]);
+
   // Notify parent when data changes
   useEffect(() => {
-    if (onDataChange) {
-      onDataChange({
-        selectedMarket,
-        hoursInput,
-        priceInput,
-        sliderMargin,
-        priceSliderMargin
-      });
-    }
-  }, [selectedMarket, hoursInput, priceInput, sliderMargin, priceSliderMargin, onDataChange]);
+    onDataChangeRef.current?.({
+      selectedMarket,
+      hoursInput,
+      priceInput,
+      sliderMargin,
+      priceSliderMargin
+    });
+  }, [selectedMarket, hoursInput, priceInput, sliderMargin, priceSliderMargin]);
 
   // Update when landscape hours change
   useEffect(() => {

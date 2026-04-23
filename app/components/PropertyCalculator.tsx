@@ -129,8 +129,7 @@ const PropertyCalculator = () => {
     adjustedDriveTime: number | null;
   } | null>(null);
 
-  // Use refs to prevent cascading updates
-  const isUpdatingFromAddress = useRef(false);
+  // Debounce timer for auto-finding the closest branch while typing the address
   const addressTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Use Supabase hook
@@ -165,8 +164,8 @@ const PropertyCalculator = () => {
       return updated;
     });
     
-    // Handle post-update actions - but skip if we're in the middle of an address update
-    if (!skipDriveTimeCalc && !isUpdatingFromAddress.current) {
+    // Handle post-update actions — callers that drive a cascade pass skipDriveTimeCalc=true
+    if (!skipDriveTimeCalc) {
       if (field === 'market' && currentProperty.address) {
         // When region changes, recalculate for the new default branch
         const newBranch = BRANCHES[value as 'PHX' | 'LV'].branches[0].id;
@@ -261,17 +260,15 @@ const PropertyCalculator = () => {
       setMaintenanceFormData(property.maintenanceData);
     }
     
-    // Clear existing drive time and proximity data first to ensure map updates
+    // Clear the previous drive time / proximity so stale values don't flash on screen.
+    // calculateDriveTime and findClosestBranch take their args explicitly, so they don't
+    // need the setCurrentProperty above to flush before they can run.
     setCalculatedDriveTime(null);
     setProximityData(null);
-    
-    // Then recalculate drive time and find closest branch after a brief delay to ensure state has updated
+
     if (property.address && property.branch) {
-      setTimeout(() => {
-        calculateDriveTime(property.address, property.branch, false);
-        // Also find the closest branch to show indicators (but don't update selection)
-        findClosestBranch(property.address, false);
-      }, 100);
+      calculateDriveTime(property.address, property.branch, false);
+      findClosestBranch(property.address, false);
     }
   };
 
@@ -415,21 +412,17 @@ const PropertyCalculator = () => {
 
         // Update market/branch if it's a new address being typed (not when loading a property)
         if (isNewAddress) {
-          // Set flag to prevent cascading updates
-          isUpdatingFromAddress.current = true;
-          
-          // Determine market based on closest branch
+          // Derive market from the closest branch and push both updates with skipDriveTimeCalc
+          // so handlePropertyChange doesn't fire its own calculateDriveTime chain.
           const isPhoenixBranch = BRANCHES.PHX.branches.some(b => b.id === result.closestBranch.id);
           const newMarket = isPhoenixBranch ? 'PHX' : 'LV';
-          
-          // Update property with suggested branch and market
+
           handlePropertyChange('market', newMarket, true);
           handlePropertyChange('branch', result.closestBranch.id, true);
-          
-          // Set the calculated drive time
+
           const driveTimeHours = Math.round(result.durationHours * 10) / 10;
           setCalculatedDriveTime(driveTimeHours);
-          
+
           // Also calculate proximity for the closest branch
           try {
             const proximityResult = await calculateProximity(
@@ -453,11 +446,6 @@ const PropertyCalculator = () => {
           } catch (proximityError) {
             console.error('Proximity calculation error in findClosestBranch:', proximityError);
           }
-          
-          // Reset flag after updates
-          setTimeout(() => {
-            isUpdatingFromAddress.current = false;
-          }, 100);
         }
       }
     } catch (error) {
