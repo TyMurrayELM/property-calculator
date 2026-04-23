@@ -1,11 +1,11 @@
 export const HOURLY_RATES = {
   PHX: {
-    MOBILE: 25,
-    ONSITE: 28.50,
+    MOBILE: 25.33,
+    ONSITE: 30.22,
   },
   LV: {
-    MOBILE: 23,
-    ONSITE: 24.75,
+    MOBILE: 24.06,
+    ONSITE: 24.83,
   },
 } as const;
 
