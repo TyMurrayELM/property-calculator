@@ -6,6 +6,16 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
 
+// Hoisted to module scope so the useEffect below doesn't need it as a dep
+// (a value re-created every render would make the effect run every render).
+const PROPERTY_COMPLEXITIES = {
+  industrial: 1.0,
+  office: 1.0,
+  hoa: 1.4,
+  retail: 1.2,
+  resort: 1.4,
+} as const;
+
 interface LandscapingEstimatorProps {
   propertyType?: string;
   onHoursUpdate?: (hours: number) => void;
@@ -19,13 +29,6 @@ const LandscapingEstimator: React.FC<LandscapingEstimatorProps> = ({
   savedData,
   onDataChange
 }) => {
-  const propertyComplexities = {
-    industrial: 1.0,
-    office: 1.0,
-    hoa: 1.4,
-    retail: 1.2,
-    resort: 1.4
-  };
 
   type LandscapeFormData = {
     propertyType: string;
@@ -72,7 +75,7 @@ const LandscapingEstimator: React.FC<LandscapingEstimatorProps> = ({
       ...prev,
       propertyType: initialPropertyType,
       complexityScore: initialPropertyType ? 
-        (propertyComplexities[initialPropertyType as keyof typeof propertyComplexities] || 1.0) + (prev.mgtOnSite ? 0.1 : 0) 
+        (PROPERTY_COMPLEXITIES[initialPropertyType as keyof typeof PROPERTY_COMPLEXITIES] || 1.0) + (prev.mgtOnSite ? 0.1 : 0) 
         : prev.complexityScore
     }));
   }, [initialPropertyType]);
@@ -126,7 +129,7 @@ const LandscapingEstimator: React.FC<LandscapingEstimatorProps> = ({
 
   const getBaseComplexity = () => {
     const industryDefault = formData.propertyType ? 
-      (propertyComplexities[formData.propertyType as keyof typeof propertyComplexities] || 1.0) : 1.0;
+      (PROPERTY_COMPLEXITIES[formData.propertyType as keyof typeof PROPERTY_COMPLEXITIES] || 1.0) : 1.0;
     const onSiteAdjustment = formData.mgtOnSite ? 0.1 : 0;
     return industryDefault + onSiteAdjustment;
   };
@@ -152,7 +155,7 @@ const LandscapingEstimator: React.FC<LandscapingEstimatorProps> = ({
     setFormData(prev => {
       // Handle property type change
       if (field === 'propertyType') {
-        const baseComplexity = propertyComplexities[value as keyof typeof propertyComplexities] || 1.0;
+        const baseComplexity = PROPERTY_COMPLEXITIES[value as keyof typeof PROPERTY_COMPLEXITIES] || 1.0;
         return {
           ...prev,
           [field]: value,
@@ -163,7 +166,7 @@ const LandscapingEstimator: React.FC<LandscapingEstimatorProps> = ({
       // Handle management on-site toggle
       if (field === 'mgtOnSite') {
         const baseComplexity = prev.propertyType ? 
-          (propertyComplexities[prev.propertyType as keyof typeof propertyComplexities] || 1.0) : 1.0;
+          (PROPERTY_COMPLEXITIES[prev.propertyType as keyof typeof PROPERTY_COMPLEXITIES] || 1.0) : 1.0;
         return {
           ...prev,
           [field]: value,
@@ -365,7 +368,7 @@ const LandscapingEstimator: React.FC<LandscapingEstimatorProps> = ({
                   <div className="flex justify-between">
                     <span>Industry Default:</span>
                     <span className="font-medium">
-                      {(propertyComplexities[formData.propertyType as keyof typeof propertyComplexities] || 1.0).toFixed(2)}
+                      {(PROPERTY_COMPLEXITIES[formData.propertyType as keyof typeof PROPERTY_COMPLEXITIES] || 1.0).toFixed(2)}
                     </span>
                   </div>
                 )}
