@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
 
     const params = new URLSearchParams({
       size: '800x200',
-      scale: '1',
+      scale: '2', // retina — renders at 1600x400 for crisp display on modern screens
       maptype: 'roadmap',
       key: GOOGLE_MAPS_API_KEY,
     });

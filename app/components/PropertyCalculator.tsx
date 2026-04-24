@@ -787,18 +787,31 @@ const PropertyCalculator = () => {
                         <SelectValue placeholder={propertiesLoading ? "Loading..." : "Load property"} />
                       </SelectTrigger>
                       <SelectContent>
-                        {savedProperties.map(property => (
-                          <SelectItem key={property.id} value={property.id!}>
-                            <div className="flex items-center justify-between w-full">
-                              <span>{property.name}</span>
-                              {property.savedAt && (
-                                <span className="text-xs text-gray-500 ml-2">
-                                  {new Date(property.savedAt).toLocaleDateString()}
-                                </span>
-                              )}
-                            </div>
-                          </SelectItem>
-                        ))}
+                        {savedProperties.map(property => {
+                          const status = property.status || 'New';
+                          const statusClass =
+                            status === 'Proposed' ? 'bg-green-100 text-green-700' :
+                            status === 'Finalizing' ? 'bg-blue-100 text-blue-700' :
+                            status === 'Estimating' ? 'bg-yellow-100 text-yellow-700' :
+                            'bg-gray-100 text-gray-700';
+                          return (
+                            <SelectItem key={property.id} value={property.id!}>
+                              <div className="flex items-center justify-between w-full gap-2">
+                                <span className="truncate">{property.name}</span>
+                                <div className="flex items-center gap-2 flex-shrink-0">
+                                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${statusClass}`}>
+                                    {status}
+                                  </span>
+                                  {property.savedAt && (
+                                    <span className="text-xs text-gray-500">
+                                      {new Date(property.savedAt).toLocaleDateString()}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </SelectItem>
+                          );
+                        })}
                       </SelectContent>
                     </Select>
                     {currentProperty.id && (
