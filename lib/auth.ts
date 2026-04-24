@@ -20,6 +20,13 @@ if (DEBUG) {
 
 const allowedDomains = process.env.ALLOWED_DOMAINS?.split(',').map(d => d.trim()).filter(Boolean) || [];
 
+// Anon-key client for server-side calls that should respect RLS.
+// Shared singleton so API routes don't each instantiate their own.
+export const supabasePublic = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
 export const getSupabaseAdmin = () => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
