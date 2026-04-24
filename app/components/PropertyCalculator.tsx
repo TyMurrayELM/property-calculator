@@ -93,17 +93,36 @@ export interface Property {
   savedAt?: Date;
 }
 
+const EMPTY_PROPERTY: Property = {
+  name: '',
+  address: '',
+  type: '',
+  market: 'PHX',
+  branch: 'phx-sw',
+  bidDueDate: null,
+  status: 'New',
+  notes: ''
+};
+
+// Snapshot just the fields a user can dirty, so comparing before/after load is stable
+const buildSnapshot = (p: Property, lfd: unknown, mfd: unknown, lh: number) => JSON.stringify({
+  name: p.name,
+  address: p.address ?? '',
+  type: p.type,
+  market: p.market,
+  branch: p.branch ?? '',
+  bidDueDate: p.bidDueDate ?? null,
+  status: p.status ?? 'New',
+  notes: p.notes ?? '',
+  lfd,
+  mfd,
+  lh,
+});
+
+const INITIAL_SNAPSHOT = buildSnapshot(EMPTY_PROPERTY, null, null, 0);
+
 const PropertyCalculator = () => {
-  const [currentProperty, setCurrentProperty] = useState<Property>({
-    name: '',
-    address: '',
-    type: '',
-    market: 'PHX',
-    branch: 'phx-sw',
-    bidDueDate: null,
-    status: 'New',
-    notes: ''
-  });
+  const [currentProperty, setCurrentProperty] = useState<Property>(EMPTY_PROPERTY);
 
   const [landscapeHours, setLandscapeHours] = useState<number>(0);
   const [landscapeFormData, setLandscapeFormData] = useState<any>(null);
@@ -122,6 +141,13 @@ const PropertyCalculator = () => {
   const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
   const [isFindingClosestBranch, setIsFindingClosestBranch] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
+  const [importResult, setImportResult] = useState<{
+    imported: number;
+    failed: number;
+    skipped: number;
+    total: number;
+    failedProperties: { name: string; address: string; reason: string }[];
+  } | null>(null);
   const [revenueSummary, setRevenueSummary] = useState<{ monthly: number; annual: number } | null>(null);
   const [proximityData, setProximityData] = useState<{
     nearbyProperties: any[];
@@ -132,6 +158,12 @@ const PropertyCalculator = () => {
 
   // Debounce timer for auto-finding the closest branch while typing the address
   const addressTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Unsaved-changes tracking: the ref holds the last snapshot we consider "clean"
+  // (set on initial mount, successful save, loadProperty, and post-delete reset).
+  // The effect below recomputes isDirty whenever any user-editable state changes.
+  const cleanSnapshotRef = useRef<string>(INITIAL_SNAPSHOT);
+  const [isDirty, setIsDirty] = useState(false);
 
   // Use Supabase hook
   const { properties: savedProperties, loading: propertiesLoading, saveProperty: saveToSupabase, deleteProperty: deleteFromSupabase } = useProperties();
@@ -203,6 +235,9 @@ const PropertyCalculator = () => {
       };
 
       await saveToSupabase(propertyToSave);
+      // Mark current state as the new clean baseline
+      cleanSnapshotRef.current = buildSnapshot(propertyToSave, landscapeFormData, maintenanceFormData, landscapeHours);
+      setIsDirty(false);
       setShowSaveDialog(false);
     } catch (error) {
       console.error('Error saving property:', error);
@@ -221,20 +256,13 @@ const PropertyCalculator = () => {
       setShowDeleteDialog(false);
       // Clear current property if it was the deleted one
       if (currentProperty.id === propertyToDelete) {
-        setCurrentProperty({
-          name: '',
-          address: '',
-          type: '',
-          market: 'PHX',
-          branch: 'phx-sw',
-          bidDueDate: null,
-          status: 'New',
-          notes: ''
-        });
+        setCurrentProperty(EMPTY_PROPERTY);
         setLandscapeHours(0);
         setCalculatedDriveTime(null);
         setLandscapeFormData(null);
         setMaintenanceFormData(null);
+        cleanSnapshotRef.current = INITIAL_SNAPSHOT;
+        setIsDirty(false);
       }
     } catch (error) {
       console.error('Error deleting property:', error);
@@ -243,24 +271,25 @@ const PropertyCalculator = () => {
   };
 
   const loadProperty = (property: Property) => {
-    setCurrentProperty({
+    const nextProperty: Property = {
       ...property,
       bidDueDate: property.bidDueDate || null,
       status: property.status || 'New',
       notes: property.notes || ''
-    });
-    if (property.totalLandscapeHours) {
-      setLandscapeHours(property.totalLandscapeHours);
-    }
-    
-    // Restore form data
-    if (property.landscapeData) {
-      setLandscapeFormData(property.landscapeData);
-    }
-    if (property.maintenanceData) {
-      setMaintenanceFormData(property.maintenanceData);
-    }
-    
+    };
+    const nextLfd = property.landscapeData ?? null;
+    const nextMfd = property.maintenanceData ?? null;
+    const nextLh = property.totalLandscapeHours || 0;
+
+    setCurrentProperty(nextProperty);
+    setLandscapeHours(nextLh);
+    setLandscapeFormData(nextLfd);
+    setMaintenanceFormData(nextMfd);
+
+    // The loaded state is the new clean baseline
+    cleanSnapshotRef.current = buildSnapshot(nextProperty, nextLfd, nextMfd, nextLh);
+    setIsDirty(false);
+
     // Clear the previous drive time / proximity so stale values don't flash on screen.
     // calculateDriveTime and findClosestBranch take their args explicitly, so they don't
     // need the setCurrentProperty above to flush before they can run.
@@ -486,15 +515,26 @@ const PropertyCalculator = () => {
   const handleFileImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    
+
     const result = await importProperties(file);
-    
+    // Clear the file input either way so the same file can be re-selected
+    event.target.value = '';
+
     if (result?.success) {
-      setShowImportDialog(false);
-      // Clear the file input
-      event.target.value = '';
-      
-      // If we have a current address, recalculate with proximity
+      setImportResult({
+        imported: result.imported ?? 0,
+        failed: result.failed ?? 0,
+        skipped: result.skipped ?? 0,
+        total: result.total ?? 0,
+        failedProperties: result.failedProperties ?? [],
+      });
+
+      // Auto-close only if everything imported cleanly
+      if (!result.failed && !result.skipped) {
+        setShowImportDialog(false);
+      }
+
+      // Recalculate proximity for the current property (if one is loaded)
       if (currentProperty.address && currentProperty.branch) {
         calculateDriveTime(currentProperty.address, currentProperty.branch);
       }
@@ -509,6 +549,24 @@ const PropertyCalculator = () => {
       }
     };
   }, []);
+
+  // Recompute dirty whenever any user-editable state changes
+  useEffect(() => {
+    const current = buildSnapshot(currentProperty, landscapeFormData, maintenanceFormData, landscapeHours);
+    setIsDirty(current !== cleanSnapshotRef.current);
+  }, [currentProperty, landscapeFormData, maintenanceFormData, landscapeHours]);
+
+  // Warn before navigating away or closing the tab with unsaved work
+  useEffect(() => {
+    if (!isDirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      // Modern browsers ignore the message string but still show a generic prompt
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [isDirty]);
 
   // Retry proximity calculation when active properties load
   useEffect(() => {
@@ -573,9 +631,15 @@ const PropertyCalculator = () => {
               </Button>
               <Dialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>
                 <DialogTrigger asChild>
-                  <Button size="sm" disabled={!currentProperty.name}>
+                  <Button size="sm" disabled={!currentProperty.name} className="relative">
                     <Save className="h-4 w-4 mr-2" />
                     Save Property
+                    {isDirty && (
+                      <span
+                        title="Unsaved changes"
+                        className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-amber-400 ring-2 ring-white"
+                      />
+                    )}
                   </Button>
                 </DialogTrigger>
                 <DialogContent>
@@ -888,11 +952,17 @@ const PropertyCalculator = () => {
                       </div>
                     </div>
                     <div>
-                      <Label>Notes</Label>
+                      <div className="flex items-baseline justify-between">
+                        <Label>Notes</Label>
+                        <span className="text-xs text-gray-400">
+                          {(currentProperty.notes || '').length} / 2000
+                        </span>
+                      </div>
                       <textarea
                         value={currentProperty.notes || ''}
                         onChange={(e) => handlePropertyChange('notes', e.target.value)}
                         placeholder="Add any additional notes about this property..."
+                        maxLength={2000}
                         className="w-full mt-1 p-2 border rounded min-h-[80px] resize-y"
                       />
                     </div>
@@ -1428,7 +1498,10 @@ const PropertyCalculator = () => {
         </Dialog>
 
         {/* Import Active Properties Dialog */}
-        <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
+        <Dialog open={showImportDialog} onOpenChange={(open) => {
+          setShowImportDialog(open);
+          if (!open) setImportResult(null);
+        }}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>Import Active Properties</DialogTitle>
@@ -1475,7 +1548,36 @@ const PropertyCalculator = () => {
                   </AlertDescription>
                 </Alert>
               )}
-              
+
+              {importResult && (importResult.failed > 0 || importResult.skipped > 0) && (
+                <Alert className="border-amber-200 bg-amber-50">
+                  <AlertCircle className="h-4 w-4 text-amber-600" />
+                  <AlertDescription className="text-amber-800">
+                    <div className="font-medium mb-1">
+                      Imported {importResult.imported} / {importResult.total}.
+                      {importResult.failed > 0 && ` ${importResult.failed} failed geocoding.`}
+                      {importResult.skipped > 0 && ` ${importResult.skipped} skipped (missing address or invalid branch).`}
+                    </div>
+                    {importResult.failedProperties.length > 0 && (
+                      <details className="mt-2">
+                        <summary className="text-sm cursor-pointer">
+                          View failures ({importResult.failedProperties.length})
+                        </summary>
+                        <div className="mt-2 max-h-48 overflow-auto bg-white rounded border border-amber-200 divide-y divide-amber-100">
+                          {importResult.failedProperties.map((fp, i) => (
+                            <div key={i} className="p-2 text-xs">
+                              <div className="font-medium text-gray-900">{fp.name}</div>
+                              <div className="text-gray-600 truncate">{fp.address}</div>
+                              <div className="text-amber-700 mt-0.5">{fp.reason}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
+
               <div className="text-xs text-gray-500">
                 <p>Example CSV format:</p>
                 <pre className="bg-gray-100 p-2 rounded mt-1">
