@@ -1,26 +1,67 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
+import { parseJson } from '@/lib/validate';
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
-export async function POST(request: NextRequest) {
-  try {
-    const { action, data } = await request.json();
+const LatLng = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+});
 
-    switch (action) {
+const MapsBody = z.discriminatedUnion('action', [
+  z.object({
+    action: z.literal('geocode'),
+    data: z.object({ address: z.string().min(1).max(500) }),
+  }),
+  z.object({
+    action: z.literal('distance'),
+    data: z.object({ origin: LatLng, destination: LatLng }),
+  }),
+  z.object({
+    action: z.literal('findClosest'),
+    data: z.object({
+      address: z.string().min(1).max(500),
+      branches: z.array(
+        z.object({
+          id: z.string(),
+          name: z.string(),
+          lat: z.number(),
+          lng: z.number(),
+          icon: z.string().optional(),
+          address: z.string().optional(),
+        })
+      ).min(1),
+    }),
+  }),
+  z.object({
+    action: z.literal('staticmap'),
+    data: z.object({
+      propertyLat: z.number(),
+      propertyLng: z.number(),
+      branchLat: z.number(),
+      branchLng: z.number(),
+      branchIcon: z.string().optional(),
+      zoom: z.number().min(1).max(21).optional(),
+    }),
+  }),
+]);
+
+export async function POST(request: NextRequest) {
+  const parsed = await parseJson(request, MapsBody);
+  if (!parsed.ok) return parsed.error;
+  const body = parsed.data;
+
+  try {
+    switch (body.action) {
       case 'geocode':
-        return await geocodeAddress(data.address);
-      
+        return await geocodeAddress(body.data.address);
       case 'distance':
-        return await calculateDistance(data.origin, data.destination);
-      
+        return await calculateDistance(body.data.origin, body.data.destination);
       case 'findClosest':
-        return await findClosestBranch(data.address, data.branches);
-      
+        return await findClosestBranch(body.data.address, body.data.branches);
       case 'staticmap':
-        return getProxiedMapUrl(data);
-      
-      default:
-        return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+        return getProxiedMapUrl(body.data);
     }
   } catch (error) {
     console.error('Maps API error:', error);

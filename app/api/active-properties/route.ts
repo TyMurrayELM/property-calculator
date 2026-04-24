@@ -1,7 +1,16 @@
 // app/api/active-properties/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import Papa from 'papaparse';
+import { z } from 'zod';
 import { supabasePublic as supabase } from '@/lib/auth';
+import { parseJson } from '@/lib/validate';
+
+const ProximityBody = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  branch: z.string().min(1).max(50),
+  radiusMiles: z.number().positive().max(100).optional().default(1),
+});
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
@@ -419,20 +428,12 @@ export async function POST(request: NextRequest) {
 
 // Get nearby properties for proximity calculation - UPDATED VERSION
 export async function PUT(request: NextRequest) {
+  const parsed = await parseJson(request, ProximityBody);
+  if (!parsed.ok) return parsed.error;
+  const { lat, lng, branch, radiusMiles } = parsed.data;
+
   try {
-    const body = await request.json();
-    const { lat, lng, branch, radiusMiles = 1 } = body;
-    
-    // Validate all required parameters (allow lat/lng of 0)
-    if (lat == null || lng == null || !branch) {
-      console.error('Missing parameters:', { lat, lng, branch });
-      return NextResponse.json({
-        error: 'Missing required parameters: lat, lng, and branch are all required'
-      }, { status: 400 });
-    }
-    
-    // Ensure branch is a string
-    const branchStr = String(branch).toLowerCase();
+    const branchStr = branch.toLowerCase();
     
     console.log('Proximity calculation request:', { lat, lng, branch: branchStr, radiusMiles });
     

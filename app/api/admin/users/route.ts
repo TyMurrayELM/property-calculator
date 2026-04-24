@@ -1,6 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
+import { z } from 'zod';
 import { authOptions, getSupabaseAdmin } from '@/lib/auth';
+import { parseJson } from '@/lib/validate';
+
+const AddUserBody = z.object({
+  email: z.string().email().transform(s => s.trim().toLowerCase()),
+  name: z.string().trim().optional(),
+  role: z.enum(['admin', 'user']).optional(),
+});
+
+const UpdateUserBody = z
+  .object({
+    id: z.string().uuid(),
+    is_active: z.boolean().optional(),
+    role: z.enum(['admin', 'user']).optional(),
+  })
+  .refine(b => b.is_active !== undefined || b.role !== undefined, {
+    message: 'At least one of is_active or role must be provided',
+  });
 
 async function requireAdmin() {
   const session = await getServerSession(authOptions);
@@ -37,14 +55,11 @@ export async function POST(request: NextRequest) {
   const guard = await requireAdmin();
   if ('error' in guard) return guard.error;
 
-  const body = await request.json();
-  const email = String(body.email || '').trim().toLowerCase();
-  const name = String(body.name || '').trim() || email.split('@')[0];
-  const role = body.role === 'admin' ? 'admin' : 'user';
-
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return NextResponse.json({ error: 'A valid email is required' }, { status: 400 });
-  }
+  const parsed = await parseJson(request, AddUserBody);
+  if (!parsed.ok) return parsed.error;
+  const { email } = parsed.data;
+  const name = parsed.data.name || email.split('@')[0];
+  const role = parsed.data.role ?? 'user';
 
   const { data, error } = await guard.supabase
     .from('allowed_users')
@@ -71,12 +86,9 @@ export async function PUT(request: NextRequest) {
   const guard = await requireAdmin();
   if ('error' in guard) return guard.error;
 
-  const body = await request.json();
-  const { id, is_active, role } = body;
-
-  if (!id) {
-    return NextResponse.json({ error: 'User id required' }, { status: 400 });
-  }
+  const parsed = await parseJson(request, UpdateUserBody);
+  if (!parsed.ok) return parsed.error;
+  const { id, is_active, role } = parsed.data;
 
   // Fetch the target so we can prevent self-demotion / self-deactivation
   const { data: target, error: fetchError } = await guard.supabase
@@ -94,12 +106,8 @@ export async function PUT(request: NextRequest) {
   }
 
   const update: Record<string, unknown> = {};
-  if (typeof is_active === 'boolean') update.is_active = is_active;
-  if (role === 'admin' || role === 'user') update.role = role;
-
-  if (Object.keys(update).length === 0) {
-    return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
-  }
+  if (is_active !== undefined) update.is_active = is_active;
+  if (role !== undefined) update.role = role;
 
   const { data, error } = await guard.supabase
     .from('allowed_users')
@@ -120,10 +128,12 @@ export async function DELETE(request: NextRequest) {
   if ('error' in guard) return guard.error;
 
   const { searchParams } = new URL(request.url);
-  const id = searchParams.get('id');
-  if (!id) {
-    return NextResponse.json({ error: 'User id required' }, { status: 400 });
+  const idParam = searchParams.get('id');
+  const parsedId = z.string().uuid().safeParse(idParam);
+  if (!parsedId.success) {
+    return NextResponse.json({ error: 'A valid user id is required' }, { status: 400 });
   }
+  const id = parsedId.data;
 
   // Prevent self-delete
   const { data: target } = await guard.supabase

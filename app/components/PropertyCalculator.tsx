@@ -11,6 +11,7 @@ import { Save, FileDown, Building2, Calculator, TreePine, MapPin, Navigation, Lo
 import MaintenanceCalculator from './MaintenanceCalculator';
 import LandscapingEstimator from './LandscapingEstimator';
 import dynamic from 'next/dynamic';
+import Papa from 'papaparse';
 import { useProperties } from '@/hooks/useProperties';
 import { useActiveProperties } from '@/hooks/useActiveProperties';
 import { UserMenu } from './UserMenu';
@@ -149,6 +150,7 @@ const PropertyCalculator = () => {
     failedProperties: { name: string; address: string; reason: string }[];
   } | null>(null);
   const [revenueSummary, setRevenueSummary] = useState<{ monthly: number; annual: number } | null>(null);
+  const [tableSort, setTableSort] = useState<'recent' | 'dueDate' | 'name' | 'price' | 'status'>('recent');
   const [proximityData, setProximityData] = useState<{
     nearbyProperties: any[];
     proximityFactor: number;
@@ -586,6 +588,81 @@ const PropertyCalculator = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [totalActiveProperties]); // Intentionally only re-run when active-properties count changes
+
+  // Memoize the branch-id → name lookup so the Properties Table doesn't rebuild it for every row
+  const branchNameById = React.useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const b of [...BRANCHES.PHX.branches, ...BRANCHES.LV.branches]) {
+      map[b.id] = b.name;
+    }
+    return map;
+  }, []);
+
+  // Derived: sorted copy of savedProperties for the Properties Table. Nulls sort last.
+  const sortedSavedProperties = React.useMemo(() => {
+    const copy = [...savedProperties];
+    switch (tableSort) {
+      case 'dueDate':
+        copy.sort((a, b) => {
+          if (!a.bidDueDate && !b.bidDueDate) return 0;
+          if (!a.bidDueDate) return 1;
+          if (!b.bidDueDate) return -1;
+          return a.bidDueDate.localeCompare(b.bidDueDate);
+        });
+        break;
+      case 'name':
+        copy.sort((a, b) => a.name.localeCompare(b.name));
+        break;
+      case 'price':
+        copy.sort((a, b) => propertyMonthlyPrice(b) - propertyMonthlyPrice(a));
+        break;
+      case 'status': {
+        const order: Record<string, number> = { Proposed: 0, Finalizing: 1, Estimating: 2, New: 3 };
+        copy.sort((a, b) => (order[a.status || 'New'] ?? 99) - (order[b.status || 'New'] ?? 99));
+        break;
+      }
+      case 'recent':
+      default:
+        copy.sort((a, b) => {
+          const aT = a.savedAt ? new Date(a.savedAt).getTime() : 0;
+          const bT = b.savedAt ? new Date(b.savedAt).getTime() : 0;
+          return bT - aT;
+        });
+    }
+    return copy;
+  }, [savedProperties, tableSort]);
+
+  // Build a CSV blob from the current sorted list and trigger a browser download
+  const downloadPropertiesCSV = () => {
+    const rows = sortedSavedProperties.map(p => {
+      const margin = p.maintenanceData?.sliderMargin ?? p.maintenanceData?.priceSliderMargin ?? 55;
+      return {
+        name: p.name,
+        address: p.address ?? '',
+        type: p.type ?? '',
+        market: p.market ?? '',
+        branch: branchNameById[p.branch ?? ''] ?? p.branch ?? '',
+        status: p.status ?? 'New',
+        bidDueDate: p.bidDueDate ?? '',
+        weeklyHours: p.totalLandscapeHours ?? '',
+        driveTimeHours: p.calculatedDriveTime ?? '',
+        monthlyPrice: Math.round(propertyMonthlyPrice(p)),
+        marginPercent: margin,
+        notes: (p.notes ?? '').replace(/\r?\n/g, ' '),
+        savedAt: p.savedAt ? new Date(p.savedAt).toISOString() : '',
+      };
+    });
+    const csv = Papa.unparse(rows);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `saved-properties-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -1218,10 +1295,31 @@ const PropertyCalculator = () => {
         }}>
           <DialogContent className="!max-w-[95vw] max-h-[90vh] overflow-hidden flex flex-col">
             <DialogHeader className="pb-3">
-              <DialogTitle className="text-2xl">Saved Property Estimates</DialogTitle>
-              <DialogDescription className="text-base">
-                View and manage all saved property estimates
-              </DialogDescription>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <DialogTitle className="text-2xl">Saved Property Estimates</DialogTitle>
+                  <DialogDescription className="text-base">
+                    View and manage all saved property estimates
+                  </DialogDescription>
+                </div>
+                {savedProperties.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <Label className="text-sm text-gray-600">Sort by</Label>
+                    <Select value={tableSort} onValueChange={(v) => setTableSort(v as typeof tableSort)}>
+                      <SelectTrigger className="w-40 h-9">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="recent">Recently saved</SelectItem>
+                        <SelectItem value="dueDate">Due date (soonest)</SelectItem>
+                        <SelectItem value="name">Name</SelectItem>
+                        <SelectItem value="price">Monthly price</SelectItem>
+                        <SelectItem value="status">Status</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
             </DialogHeader>
             <div className="flex-1 overflow-auto">
               {propertiesLoading ? (
@@ -1266,14 +1364,13 @@ const PropertyCalculator = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white">
-                      {savedProperties.map((property, index) => {
+                      {sortedSavedProperties.map((property, index) => {
                         const monthlyPrice = propertyMonthlyPrice(property);
-                        
-                        const margin = property.maintenanceData?.sliderMargin || 
+
+                        const margin = property.maintenanceData?.sliderMargin ||
                                      property.maintenanceData?.priceSliderMargin || 55;
-                        
-                        const branchName = [...BRANCHES.PHX.branches, ...BRANCHES.LV.branches]
-                          .find(b => b.id === property.branch)?.name || property.branch || '-';
+
+                        const branchName = branchNameById[property.branch ?? ''] || property.branch || '-';
                         
                         const hasNotes = property.notes && property.notes.trim().length > 0;
                         const isNotesExpanded = expandedNotes.has(property.id!);
@@ -1424,22 +1521,33 @@ const PropertyCalculator = () => {
             </div>
             {savedProperties.length > 0 && (
               <div className="border-t pt-3 mt-2">
-                <div className="flex justify-between items-center px-5">
+                <div className="flex justify-between items-center px-5 gap-3">
                   <span className="text-base font-medium text-gray-700">Total Properties: {savedProperties.length}</span>
-                  <Button
-                    variant="outline"
-                    size="default"
-                    onClick={() => {
-                      const totalMonthly = savedProperties.reduce(
-                        (sum, property) => sum + propertyMonthlyPrice(property),
-                        0
-                      );
-                      setRevenueSummary({ monthly: totalMonthly, annual: totalMonthly * 12 });
-                    }}
-                    className="px-6"
-                  >
-                    View Revenue Summary
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="default"
+                      onClick={downloadPropertiesCSV}
+                      className="px-4"
+                    >
+                      <FileDown className="h-4 w-4 mr-2" />
+                      Download CSV
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="default"
+                      onClick={() => {
+                        const totalMonthly = savedProperties.reduce(
+                          (sum, property) => sum + propertyMonthlyPrice(property),
+                          0
+                        );
+                        setRevenueSummary({ monthly: totalMonthly, annual: totalMonthly * 12 });
+                      }}
+                      className="px-6"
+                    >
+                      View Revenue Summary
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
