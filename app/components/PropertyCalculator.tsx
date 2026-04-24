@@ -14,7 +14,8 @@ import dynamic from 'next/dynamic';
 import { useProperties } from '@/hooks/useProperties';
 import { useActiveProperties } from '@/hooks/useActiveProperties';
 import { UserMenu } from './UserMenu';
-import { HOURLY_RATES, WEEKS_PER_MONTH } from '@/lib/constants';
+import { propertyMonthlyPrice } from '@/lib/pricing';
+import { parseLocalDate, startOfToday } from '@/lib/utils';
 
 // Dynamically import RouteMap to avoid SSR issues
 const RouteMap = dynamic(() => import('./RouteMap'), {
@@ -659,7 +660,7 @@ const PropertyCalculator = () => {
                     {currentProperty.name}
                     {currentProperty.type && ` • ${currentProperty.type}`}
                     {currentProperty.status && currentProperty.status !== 'New' && ` • ${currentProperty.status}`}
-                    {currentProperty.bidDueDate && ` • Due: ${new Date(currentProperty.bidDueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
+                    {currentProperty.bidDueDate && ` • Due: ${parseLocalDate(currentProperty.bidDueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
                     {getCurrentBranch() && ` • ${getCurrentBranch()?.name}`}
                   </span>
                 )}
@@ -1196,22 +1197,7 @@ const PropertyCalculator = () => {
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white">
                       {savedProperties.map((property, index) => {
-                        // Extract data from saved form data
-                        const monthlyPrice = property.maintenanceData?.hoursInput ? 
-                          (() => {
-                            const market = property.market || 'PHX';
-                            const hourlyRate = HOURLY_RATES[market][
-                              property.maintenanceData.hoursInput.isOnsiteCrew ? 'ONSITE' : 'MOBILE'
-                            ];
-                            const driveTime = property.maintenanceData.hoursInput.driveTimeHours * 
-                              (property.maintenanceData.hoursInput.crewSize || 1);
-                            const totalHoursPerVisit = property.maintenanceData.hoursInput.weeklyHours + driveTime;
-                            const totalHoursPerMonth = totalHoursPerVisit * WEEKS_PER_MONTH;
-                            const costPerMonth = totalHoursPerMonth * hourlyRate;
-                            const margin = property.maintenanceData.sliderMargin || 55;
-                            return costPerMonth / (1 - (margin / 100));
-                          })() : 
-                          property.maintenanceData?.priceInput?.monthlyPrice || 0;
+                        const monthlyPrice = propertyMonthlyPrice(property);
                         
                         const margin = property.maintenanceData?.sliderMargin || 
                                      property.maintenanceData?.priceSliderMargin || 55;
@@ -1247,21 +1233,24 @@ const PropertyCalculator = () => {
                                 </span>
                               </td>
                               <td className="px-5 py-3 text-center whitespace-nowrap">
-                                {property.bidDueDate ? (
-                                  <div className={`text-sm ${
-                                    new Date(property.bidDueDate) < new Date() 
-                                      ? 'text-red-600 font-medium' 
-                                      : new Date(property.bidDueDate) < new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-                                      ? 'text-amber-600 font-medium'
-                                      : 'text-gray-700'
-                                  }`}>
-                                    {new Date(property.bidDueDate).toLocaleDateString('en-US', { 
-                                      month: 'short', 
-                                      day: 'numeric',
-                                      year: 'numeric'
-                                    })}
-                                  </div>
-                                ) : (
+                                {property.bidDueDate ? (() => {
+                                  const due = parseLocalDate(property.bidDueDate);
+                                  const today = startOfToday();
+                                  const oneWeekOut = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+                                  const cls =
+                                    due < today ? 'text-red-600 font-medium' :
+                                    due < oneWeekOut ? 'text-amber-600 font-medium' :
+                                    'text-gray-700';
+                                  return (
+                                    <div className={`text-sm ${cls}`}>
+                                      {due.toLocaleDateString('en-US', {
+                                        month: 'short',
+                                        day: 'numeric',
+                                        year: 'numeric'
+                                      })}
+                                    </div>
+                                  );
+                                })() : (
                                   <span className="text-gray-400">-</span>
                                 )}
                               </td>
@@ -1371,25 +1360,10 @@ const PropertyCalculator = () => {
                     variant="outline"
                     size="default"
                     onClick={() => {
-                      const totalMonthly = savedProperties.reduce((sum, property) => {
-                        const monthlyPrice = property.maintenanceData?.hoursInput ?
-                          (() => {
-                            const market = property.market || 'PHX';
-                            const hourlyRate = HOURLY_RATES[market][
-                              property.maintenanceData.hoursInput.isOnsiteCrew ? 'ONSITE' : 'MOBILE'
-                            ];
-                            const driveTime = property.maintenanceData.hoursInput.driveTimeHours *
-                              (property.maintenanceData.hoursInput.crewSize || 1);
-                            const totalHoursPerVisit = property.maintenanceData.hoursInput.weeklyHours + driveTime;
-                            const totalHoursPerMonth = totalHoursPerVisit * WEEKS_PER_MONTH;
-                            const costPerMonth = totalHoursPerMonth * hourlyRate;
-                            const margin = property.maintenanceData.sliderMargin || 55;
-                            return costPerMonth / (1 - (margin / 100));
-                          })() :
-                          property.maintenanceData?.priceInput?.monthlyPrice || 0;
-                        return sum + monthlyPrice;
-                      }, 0);
-
+                      const totalMonthly = savedProperties.reduce(
+                        (sum, property) => sum + propertyMonthlyPrice(property),
+                        0
+                      );
                       setRevenueSummary({ monthly: totalMonthly, annual: totalMonthly * 12 });
                     }}
                     className="px-6"

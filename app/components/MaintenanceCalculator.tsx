@@ -8,7 +8,16 @@ import {
 } from "@/components/ui/tooltip";
 import { Card } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { HOURLY_RATES, WEEKS_PER_MONTH, type Market } from '@/lib/constants';
+import { type Market } from '@/lib/constants';
+import {
+  applyMargin,
+  calculateHoursToPrice,
+  calculatePriceToHours,
+  getHourlyRate,
+  initialPriceDriveTime,
+  type HoursInput,
+  type PriceInput,
+} from '@/lib/pricing';
 
 interface MaintenanceCalculatorProps {
   selectedMarket: 'PHX' | 'LV';
@@ -32,31 +41,9 @@ const MaintenanceCalculator: React.FC<MaintenanceCalculatorProps> = ({
   );
   const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
   
-  // Calculate initial drive time for Price to Hours based on 15% of on-property time
-  const calculateInitialPriceDriveTime = () => {
-    const hourlyRate = HOURLY_RATES[selectedMarket].MOBILE;
-    const costPerMonth = 2000 * (1 - 0.55);
-    const totalHoursPerMonth = costPerMonth / hourlyRate;
-    const totalHoursPerWeek = totalHoursPerMonth / WEEKS_PER_MONTH;
-    const driveTimeHours = 0.15 * (totalHoursPerWeek / 1.15);
-    return Math.round(driveTimeHours * 10) / 10;
-  };
-
   // IMPORTANT: Saved drive time takes precedence over calculated drive time
   // This allows users to manually adjust drive time based on local knowledge
   // (e.g., multiple properties nearby, traffic patterns, etc.)
-
-  type HoursInput = {
-    weeklyHours: number;
-    driveTimeHours: number;
-    isOnsiteCrew: boolean;
-    crewSize: number;
-  };
-  type PriceInput = {
-    monthlyPrice: number;
-    driveTimeHours: number;
-    isOnsiteCrew: boolean;
-  };
 
   const [hoursInput, setHoursInput] = useState<HoursInput>(() => {
     if (savedData?.hoursInput) {
@@ -79,7 +66,7 @@ const MaintenanceCalculator: React.FC<MaintenanceCalculatorProps> = ({
     }
     return {
       monthlyPrice: 2000,
-      driveTimeHours: calculateInitialPriceDriveTime(),
+      driveTimeHours: initialPriceDriveTime(selectedMarket),
       isOnsiteCrew: false
     };
   });
@@ -220,29 +207,25 @@ const MaintenanceCalculator: React.FC<MaintenanceCalculatorProps> = ({
   const handlePriceCrewChange = (isOnsite: boolean) => {
     setPriceInput(prev => {
       if (!isOnsite) {
-        const hourlyRate = getHourlyRate(false);
-        const costPerMonth = prev.monthlyPrice * (1 - (priceSliderMargin / 100));
-        const totalHoursPerMonth = costPerMonth / hourlyRate;
-        const totalHoursPerWeek = totalHoursPerMonth / WEEKS_PER_MONTH;
+        // Seed drive time at 15% of the on-property time implied by monthlyPrice at the current margin
+        const { totalHoursPerWeek } = calculatePriceToHours(
+          { ...prev, isOnsiteCrew: false, driveTimeHours: 0 },
+          selectedMarket,
+          priceSliderMargin
+        );
         const driveTimeHours = 0.15 * (totalHoursPerWeek / 1.15);
         return {
           ...prev,
-          isOnsiteCrew: isOnsite,
+          isOnsiteCrew: false,
           driveTimeHours: Math.round(driveTimeHours * 10) / 10
         };
       }
       return {
         ...prev,
-        isOnsiteCrew: isOnsite,
+        isOnsiteCrew: true,
         driveTimeHours: 0
       };
     });
-  };
-
-  // Calculate hourly rate based on crew type and region
-  const getHourlyRate = (isOnsite: boolean) => {
-    const market = HOURLY_RATES[selectedMarket];
-    return isOnsite ? market.ONSITE : market.MOBILE;
   };
 
   // Helper function to get the appropriate icon for direct labor percentage
@@ -295,53 +278,18 @@ const MaintenanceCalculator: React.FC<MaintenanceCalculatorProps> = ({
     return Math.round((hoursInput.driveTimeHours / hoursInput.weeklyHours) * 100);
   };
 
-  // Hours to Price Calculations
-  const calculateHoursToPrice = () => {
-    const hourlyRate = getHourlyRate(hoursInput.isOnsiteCrew);
-    const driveTime = hoursInput.driveTimeHours * (hoursInput.crewSize || 1);
-    const totalHoursPerVisit = hoursInput.weeklyHours + driveTime;
-    const totalHoursPerMonth = totalHoursPerVisit * WEEKS_PER_MONTH;
-    const costPerMonth = totalHoursPerMonth * hourlyRate;
-    const priceAtSliderMargin = costPerMonth / (1 - (sliderMargin / 100));
-    const priceAt60Margin = costPerMonth / (1 - 0.6);
-
-    const pricePerHourAtSliderMargin = priceAtSliderMargin / totalHoursPerMonth;
-    const pricePerHourAt60Margin = priceAt60Margin / totalHoursPerMonth;
-
-    return {
-      driveTime,
-      totalHoursPerVisit,
-      totalHoursPerMonth,
-      costPerMonth,
-      priceAtSliderMargin,
-      priceAt60Margin,
-      pricePerHourAtSliderMargin,
-      pricePerHourAt60Margin
-    };
+  // Hours → Price at the slider's margin, plus price at a fixed 60% target for comparison.
+  const hoursToPriceAtSlider = calculateHoursToPrice(hoursInput, selectedMarket, sliderMargin);
+  const priceAt60Margin = applyMargin(hoursToPriceAtSlider.costPerMonth, 60);
+  const results1 = {
+    ...hoursToPriceAtSlider,
+    priceAtSliderMargin: hoursToPriceAtSlider.priceAtMargin,
+    pricePerHourAtSliderMargin: hoursToPriceAtSlider.pricePerHourAtMargin,
+    priceAt60Margin,
+    pricePerHourAt60Margin: priceAt60Margin / hoursToPriceAtSlider.totalHoursPerMonth,
   };
 
-  // Price to Hours Calculations (NO CREW SIZE)
-  const calculatePriceToHours = () => {
-    const hourlyRate = getHourlyRate(priceInput.isOnsiteCrew);
-    const costPerMonth = priceInput.monthlyPrice * (1 - (priceSliderMargin / 100));
-    const totalHoursPerMonth = costPerMonth / hourlyRate;
-    const totalHoursPerWeek = totalHoursPerMonth / WEEKS_PER_MONTH;
-    const driveTime = priceInput.driveTimeHours; // No crew size multiplication
-    const onPropertyHours = totalHoursPerWeek - driveTime;
-    const pricePerHour = priceInput.monthlyPrice / totalHoursPerMonth;
-    
-    return {
-      costPerMonth,
-      totalHoursPerMonth,
-      totalHoursPerWeek,
-      driveTime,
-      onPropertyHours,
-      pricePerHour
-    };
-  };
-
-  const results1 = calculateHoursToPrice();
-  const results2 = calculatePriceToHours();
+  const results2 = calculatePriceToHours(priceInput, selectedMarket, priceSliderMargin);
 
   // Calculate percentage for Price to Hours display
   const calculatePriceDriveTimePercentage = () => {
@@ -511,7 +459,7 @@ const MaintenanceCalculator: React.FC<MaintenanceCalculatorProps> = ({
                 <span className="font-bold">
                   ${results1.costPerMonth.toLocaleString('en-US', { maximumFractionDigits: 0 })}
                   <span className="text-gray-600 text-xs ml-1">
-                    (${getHourlyRate(hoursInput.isOnsiteCrew)}/hr)
+                    (${getHourlyRate(selectedMarket, hoursInput.isOnsiteCrew)}/hr)
                   </span>
                 </span>
               </div>
