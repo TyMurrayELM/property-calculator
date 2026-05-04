@@ -72,10 +72,10 @@ const MaintenanceCalculator: React.FC<MaintenanceCalculatorProps> = ({
   });
   
   const [sliderMargin, setSliderMargin] = useState(
-    savedData?.sliderMargin || 55
+    savedData?.sliderMargin || 60
   );
   const [priceSliderMargin, setPriceSliderMargin] = useState(
-    savedData?.priceSliderMargin || 55
+    savedData?.priceSliderMargin || 60
   );
 
   // Keep the latest onDataChange in a ref so the effect below doesn't loop if
